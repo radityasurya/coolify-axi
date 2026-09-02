@@ -30,7 +30,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test",
     "build:skill": "node scripts/build-skill.mjs",
     "check:skill": "node scripts/build-skill.mjs --check"
   },
