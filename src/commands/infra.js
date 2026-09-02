@@ -1,4 +1,4 @@
-import { coolify, health, summarize } from "../coolify.js";
+import { coolify, health, matchOrRaise, summarize } from "../coolify.js";
 import { BIN, helpFor, makeDispatcher, parse, required, wantsHelp } from "../args.js";
 
 /** service and server are thin list/get pairs over the same shape. */
@@ -39,16 +39,7 @@ function listGet({ noun, plural, subject, columns, detailFields }) {
     const options = { context: values.context };
 
     const rows = await coolify([subject, "list"], options);
-    const wanted = String(selector).toLowerCase();
-    const found =
-      rows.find((item) => item.uuid === selector) ??
-      rows.find((item) => String(item.name).toLowerCase() === wanted);
-    if (!found) {
-      return {
-        [plural]: `no ${subject} named ${selector}`,
-        help: [`Run \`${BIN} ${noun} list\` to see all ${rows.length}`],
-      };
-    }
+    const found = matchOrRaise(rows, selector, subject);
 
     const detail = await coolify([subject, "get", found.uuid], options);
     return {

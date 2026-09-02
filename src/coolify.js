@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { AxiError } from "axi-sdk-js";
+import { BIN } from "./args.js";
 
 const exec = promisify(execFile);
 
@@ -140,6 +141,31 @@ export function summarize(items, field = "status") {
     .sort((a, b) => b[1] - a[1])
     .map(([state, count]) => `${count} ${state}`)
     .join(", ");
+}
+
+/**
+ * Match a name or uuid against an already-fetched listing, raising NOT_FOUND on
+ * a miss so every noun reports a lookup failure the same way. Nouns that are not
+ * addressable through `resource list` (databases, services, servers) resolve
+ * against their own listing but must still fail like `resolveResource` does —
+ * returning a "not found" payload would exit 0 and make a miss indistinguishable
+ * from a hit to anything scripting on exit codes.
+ */
+export function matchOrRaise(rows, selector, subject) {
+  const wanted = String(selector).toLowerCase();
+  const found =
+    rows.find((item) => item.uuid === selector) ??
+    rows.find((item) => String(item.name).toLowerCase() === wanted);
+  if (found) return found;
+
+  const near = rows
+    .filter((item) => String(item.name).toLowerCase().includes(wanted))
+    .slice(0, 5)
+    .map((item) => `Run with ${item.name}`);
+  throw new AxiError(`no ${subject} named ${selector}`, "NOT_FOUND", [
+    ...near,
+    `Run \`${BIN} ${subject} list\` to see all ${rows.length}`,
+  ]);
 }
 
 /**

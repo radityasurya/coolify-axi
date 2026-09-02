@@ -142,3 +142,24 @@ Two traps stacked here, both surfaced only on Node 20 in CI:
 Naming the directory `tests` fixes both: `tests/*.test.js` still matches the default
 `**/*.test.js` pattern by name, while `tests/helpers.js` and `tests/fixtures/**` match none
 of the default patterns and stay out of the run. Do not rename it back to `test/`.
+
+## Lookup misses must raise, not return (`src/coolify.js#matchOrRaise`)
+
+`db get`, `service get`, and `server get` originally resolved a name against
+their own listing and returned a `no <subject> named <x>` payload on a miss.
+That exits 0, which makes a miss indistinguishable from a hit to anything
+scripting on exit codes — while `app get`, which routes through
+`resolveResource()`, raised `NOT_FOUND` and exited 1. Same failure class, two
+answers.
+
+Databases, services, and servers are not addressable through `resource list`
+(databases appear there as `standalone-postgresql` and friends), so they cannot
+simply reuse `resolveResource()`. `matchOrRaise(rows, selector, subject)` is the
+shared miss path for listing-backed nouns: uuid first, then exact name, then a
+`NOT_FOUND` AxiError carrying substring near-matches.
+
+A "definitive empty state" (AXI §5) is the right shape for an empty *list*. It is
+the wrong shape for a *lookup by identifier* that found nothing — that is an
+error, and must exit non-zero. Caught by the AXI catalog's admission review, not
+by the suite, which is why `tests/wrapper.test.js` now asserts all four nouns
+raise `NOT_FOUND` together.
