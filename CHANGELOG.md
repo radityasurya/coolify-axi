@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/radityasurya/coolify-axi/compare/v0.1.1...v0.1.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* raise NOT_FOUND on a lookup miss for db, service, and server ([ebfe68a](https://github.com/radityasurya/coolify-axi/commit/ebfe68a2234a59cf48b6c72e56fa2e46ac4428b6))
+
 ## [0.1.1](https://github.com/radityasurya/coolify-axi/compare/v0.1.0...v0.1.1) (2026-09-02)
 
 
