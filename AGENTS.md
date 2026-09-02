@@ -95,9 +95,25 @@ Regenerate with `npm run build:skill`; CI runs `npm run check:skill` and
 ## Release process
 
 Releases are cut by release-please from conventional commits on `main`; merging the bot's
-release PR triggers `npm publish` via `.github/workflows/release-please.yml` (needs an
-`NPM_TOKEN` secret). Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json` — a
-guard workflow blocks PRs that touch them.
+release PR triggers `npm publish` via `.github/workflows/release-please.yml`. Do not
+hand-edit `CHANGELOG.md` or `.release-please-manifest.json` — a guard workflow blocks PRs
+that touch them.
+
+Publishing uses **npm trusted publishing (OIDC)**, not a stored token. The workflow's
+`id-token: write` permission lets npm verify the workflow's identity directly, so there is
+no `NPM_TOKEN` secret to rotate or leak, and provenance is attested automatically. This is
+not merely tidier: the npm account is passkey-protected with `two-factor auth:
+auth-and-writes`, so any token capable of unattended publishing would be a deliberate hole
+in that 2FA — which is exactly what npm is now restricting.
+
+The trust relationship is registered once, against the **workflow filename**:
+
+```sh
+npm trust github coolify-axi --repo radityasurya/coolify-axi --file release-please.yml --allow-publish
+```
+
+Renaming `release-please.yml` therefore breaks publishing until the relationship is
+re-registered. `npm trust list coolify-axi` shows the current configuration.
 
 Every `pull_request` workflow uses `paths-ignore` for the release-please output set
 (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero

@@ -31,7 +31,9 @@ jobs:
         run: npm ci
       - if: ${{ steps.release.outputs.release_created }}
         run: npm test
+      # Trusted publishing (OIDC): npm verifies this workflow's identity via the
+      # id-token above, so there is no long-lived token to store or leak. Configured
+      # with `npm trust github coolify-axi --repo <nwo> --file release-please.yml`.
+      # Provenance is generated automatically; no NODE_AUTH_TOKEN.
       - if: ${{ steps.release.outputs.release_created }}
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
