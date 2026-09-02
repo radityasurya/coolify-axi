@@ -1,0 +1,41 @@
+{
+  "name": "coolify-axi",
+  "version": "0.1.0",
+  "description": "AXI-compliant Coolify CLI \u2014 apps, databases, services, and deployments with token-efficient TOON output",
+  "keywords": [
+    "axi",
+    "coolify",
+    "deployment",
+    "devops",
+    "agent",
+    "cli",
+    "toon"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "coolify-axi": "bin/coolify-axi.js"
+  },
+  "exports": {
+    ".": "./src/cli.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "build:skill": "node scripts/build-skill.mjs",
+    "check:skill": "node scripts/build-skill.mjs --check"
+  },
+  "dependencies": {
+    "axi-sdk-js": "^0.1.11",
+    "@toon-format/toon": "^0.9.0"
+  }
+}
