@@ -11,7 +11,7 @@ Node 20+ is required; CI runs the suite on 20, 22, and 24. There is no build ste
 transpile — `bin/coolify-axi.js` runs `src/` directly.
 
 The test suite needs no Coolify instance and makes no network calls. It runs against
-`test/fixtures/fake-coolify.mjs`, a stand-in for the wrapped binary selected through
+`tests/fixtures/fake-coolify.mjs`, a stand-in for the wrapped binary selected through
 `COOLIFY_AXI_BIN`.
 
 ## Before you push

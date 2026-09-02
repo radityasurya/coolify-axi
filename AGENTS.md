@@ -27,7 +27,7 @@ gh-axi's size, revisit — but do not convert for symmetry alone.
 **stderr** for essentially every invocation. It does not corrupt stdout JSON, but it is
 noise that must never reach the agent, and it must not be mistaken for a diagnostic when a
 command genuinely fails. `meaningfulStderr()` filters that one line before error
-translation; `test/fixtures/fake-coolify.mjs` always emits it so the filtering is covered.
+translation; `tests/fixtures/fake-coolify.mjs` always emits it so the filtering is covered.
 
 ## `--reveal` must reach the wrapped CLI (`src/commands/app.js`, `src/commands/db.js`)
 
@@ -105,8 +105,24 @@ runs.
 
 ## Testing without a Coolify instance
 
-`test/fixtures/fake-coolify.mjs` is a stand-in binary selected via `COOLIFY_AXI_BIN`. It
+`tests/fixtures/fake-coolify.mjs` is a stand-in binary selected via `COOLIFY_AXI_BIN`. It
 keys on the leading subcommand path only, stopping at the first flag — otherwise a flag
 *value* (`--lines 100`) lands in the lookup key and every log test misses. Tests therefore
 exercise the real `execFile` path rather than mocking the wrapper, which is what caught both
 redaction bugs above.
+
+## Test discovery: `tests/`, not `test/` (CI caught this)
+
+Two traps stacked here, both surfaced only on Node 20 in CI:
+
+- `node --test "test/*.test.js"` needs the runner to expand the glob itself, which is
+  **Node 22+**. On Node 20 the pattern is taken literally and the run fails with
+  `Could not find '.../test/*.test.js'`. The script is therefore a bare `node --test`,
+  relying on default discovery.
+- Default discovery treats **every file under a directory named `test`** as a test file, not
+  just `*.test.js`. That ran `fake-coolify.mjs` (which exits 1 by design when handed an
+  unknown command) as a test, and reported `helpers.js` as an empty passing test.
+
+Naming the directory `tests` fixes both: `tests/*.test.js` still matches the default
+`**/*.test.js` pattern by name, while `tests/helpers.js` and `tests/fixtures/**` match none
+of the default patterns and stay out of the run. Do not rename it back to `test/`.

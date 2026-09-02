@@ -165,7 +165,7 @@ npm run check:skill   # CI drift check
 node bin/coolify-axi.js --help
 ```
 
-Tests run against `test/fixtures/fake-coolify.mjs`, a stand-in binary wired up through
+Tests run against `tests/fixtures/fake-coolify.mjs`, a stand-in binary wired up through
 `COOLIFY_AXI_BIN`. That exercises the real spawn path — argv construction, JSON parsing, and
 stderr-banner filtering — rather than mocking the wrapper away.
 
