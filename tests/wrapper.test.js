@@ -77,3 +77,31 @@ test("context reports which instance is active", async () => {
   assert.equal(output.active, "hireopz");
   assert.equal(output.contexts.length, 2);
 });
+
+test("every noun raises NOT_FOUND on a lookup miss, so exit codes agree", async () => {
+  // Regression: db/service/server resolved against their own listing and
+  // returned a "no X named Y" payload, which exits 0 — indistinguishable from a
+  // hit to anything scripting on exit codes, while `app get` raised NOT_FOUND.
+  const { appCommand } = await import("../src/commands/app.js");
+  const { serverCommand, serviceCommand } = await import("../src/commands/infra.js");
+
+  for (const [label, run] of [
+    ["db", () => dbCommand(["get", "nope"])],
+    ["service", () => serviceCommand(["get", "nope"])],
+    ["server", () => serverCommand(["get", "nope"])],
+    ["app", () => appCommand(["get", "nope"])],
+  ]) {
+    await assert.rejects(
+      run,
+      (error) => error.code === "NOT_FOUND",
+      `${label} get must raise NOT_FOUND on a miss, not return a payload`,
+    );
+  }
+});
+
+test("a near match is still suggested when the lookup misses", async () => {
+  await assert.rejects(
+    () => dbCommand(["get", "blogs"]),
+    (error) => error.suggestions.some((s) => s.includes("blogs-pg")),
+  );
+});

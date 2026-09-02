@@ -1,4 +1,4 @@
-import { coolify, health, redact, resolveResource, summarize } from "../coolify.js";
+import { coolify, health, matchOrRaise, redact, summarize } from "../coolify.js";
 import { BIN, helpFor, makeDispatcher, parse, required, wantsHelp } from "../args.js";
 
 const TYPE_PREFIX = ["postgresql", "mysql", "mariadb", "mongodb", "redis", "keydb", "dragonfly", "clickhouse"];
@@ -68,20 +68,7 @@ async function get(argv) {
   // Databases are not in `resource list` under a single type, so match the
   // database listing directly rather than through resolveResource.
   const rows = await coolify(["database", "list"], options);
-  const wanted = String(selector).toLowerCase();
-  const found =
-    rows.find((item) => item.uuid === selector) ??
-    rows.find((item) => String(item.name).toLowerCase() === wanted);
-  if (!found) {
-    const near = rows
-      .filter((item) => String(item.name).toLowerCase().includes(wanted))
-      .slice(0, 5)
-      .map((item) => `Run with ${item.name}`);
-    return {
-      databases: `no database named ${selector}`,
-      help: [...near, `Run \`${BIN} db list\` to see all ${rows.length}`],
-    };
-  }
+  const found = matchOrRaise(rows, selector, "database");
 
   const detail = await coolify(
     ["database", "get", found.uuid, ...(values.reveal ? ["--show-sensitive"] : [])],

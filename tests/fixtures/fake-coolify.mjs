@@ -31,8 +31,19 @@ const DATABASES = [
   },
 ];
 
+const SERVICES = [
+  { uuid: "svc1".padEnd(24, "x"), name: "cAdvisor", status: "running:healthy", description: "" },
+];
+const SERVERS = [
+  { uuid: "srv1".padEnd(24, "x"), name: "localhost", ip: "host.docker.internal", user: "root", port: 22 },
+];
+
 const TABLE = {
   "resource list": RESOURCES,
+  "service list": SERVICES,
+  "server list": SERVERS,
+  [`service get ${SERVICES[0].uuid}`]: SERVICES[0],
+  [`server get ${SERVERS[0].uuid}`]: SERVERS[0],
   "database list": DATABASES,
   [`database get ${DATABASES[0].uuid}`]: DATABASES[0],
   [`app get ${RESOURCES[0].uuid}`]: {
