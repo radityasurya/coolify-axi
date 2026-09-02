@@ -11,6 +11,14 @@
     "cli",
     "toon"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/radityasurya/coolify-axi.git"
+  },
+  "homepage": "https://github.com/radityasurya/coolify-axi#readme",
+  "bugs": {
+    "url": "https://github.com/radityasurya/coolify-axi/issues"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
