@@ -43,6 +43,9 @@ npx -y ${BIN} app list --status exited # only what is broken
 npx -y ${BIN} app get <name>
 npx -y ${BIN} app logs <name>
 npx -y ${BIN} app env <name>
+npx -y ${BIN} app env <name> --set KEY=value
+npx -y ${BIN} app domain <name>
+npx -y ${BIN} app domain <name> --add https://new.example
 npx -y ${BIN} app restart <name>
 npx -y ${BIN} deploy <name>            # shorthand for \`deploy run <name>\`
 npx -y ${BIN} deploy list
@@ -62,6 +65,11 @@ specific Coolify instance instead of the default.
   value, and never echo it into a summary.
 - **\`app start\` / \`app stop\` are idempotent** — already in the target state exits 0 as a
   no-op. Declare the desired state; do not read first.
+- **Adding a domain never drops the others.** \`app domain --add\` reads the current list and
+  appends; passing domains positionally replaces the list and reports what it removed.
+  Leaving an app with zero domains is refused — Coolify would stop routing to it.
+- **\`app env --set\` is idempotent and never echoes values back.** A value already stored is
+  reported \`unchanged\` without a write; changes apply on the next deployment.
 - **Logs are truncated** with a size hint; pass \`--full\` when the tail is not enough.
 - **Errors are structured** on stdout with a \`help\` block naming the fix, and an unknown
   flag exits 2 listing the valid flags. Correct the flag — do not drop the filter.

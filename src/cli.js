@@ -19,7 +19,7 @@ export const TOP_HELP = `${encode({
   usage: `${BIN} [command] [args] [flags]`,
   commands: {
     "(none)": "dashboard — every resource and its health",
-    app: "list, get, logs, env, start, stop, restart",
+    app: "list, get, logs, env, domain, start, stop, restart",
     db: "list, get",
     service: "list, get",
     server: "list, get",

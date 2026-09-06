@@ -62,6 +62,10 @@ const TABLE = {
     { key: "DATABASE_PASSWORD", value: "hunter2", is_build_time: false },
   ],
   [`app stop ${RESOURCES[0].uuid}`]: { message: "stopping" },
+  [`app update ${RESOURCES[0].uuid}`]: { message: "updated" },
+  [`app env create ${RESOURCES[0].uuid}`]: { message: "created" },
+  [`app env update ${RESOURCES[0].uuid} NODE_ENV`]: { message: "updated" },
+  [`app env update ${RESOURCES[0].uuid} DATABASE_PASSWORD`]: { message: "updated" },
   [`app start ${RESOURCES[1].uuid}`]: { message: "starting" },
   [`deploy uuid ${RESOURCES[0].uuid}`]: [{ deployment_uuid: "dep1", message: "queued" }],
   "deploy list": [],
@@ -71,10 +75,29 @@ const TABLE = {
   ],
 };
 
+// Tests assert on what the wrapper actually invoked, not just what it returned.
+if (process.env.FAKE_COOLIFY_LOG) {
+  const { appendFileSync } = await import("node:fs");
+  appendFileSync(process.env.FAKE_COOLIFY_LOG, `${JSON.stringify(argv)}\n`);
+}
+
 if (process.env.FAKE_COOLIFY_FAIL) {
   process.stderr.write(`Error: ${process.env.FAKE_COOLIFY_FAIL}\n`);
   process.exit(1);
 }
+// The real CLI answers mutations with a plain-text confirmation rather than
+// JSON, so parsing their output would fail an otherwise successful write.
+const PLAIN_TEXT = new Set([
+  `app update ${RESOURCES[0].uuid}`,
+  `app env create ${RESOURCES[0].uuid}`,
+  `app env update ${RESOURCES[0].uuid} NODE_ENV`,
+  `app env update ${RESOURCES[0].uuid} DATABASE_PASSWORD`,
+]);
+if (PLAIN_TEXT.has(key)) {
+  process.stdout.write("Environment variable updated successfully\n");
+  process.exit(0);
+}
+
 if (!(key in TABLE)) {
   process.stderr.write(`Error: unknown command "${key}"\n`);
   process.exit(1);

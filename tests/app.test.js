@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appCommand } from "../src/commands/app.js";
-import { failWith, useFakeCoolify } from "./helpers.js";
+import { failWith, recordCalls, useFakeCoolify } from "./helpers.js";
 
 test.beforeEach(useFakeCoolify);
 
@@ -82,4 +82,82 @@ test("a wrapped-CLI auth failure becomes a structured auth error", async () => {
     () => appCommand(["list"]),
     (error) => error.code === "AUTH_ERROR" && error.suggestions.some((s) => s.includes("context")),
   );
+});
+
+test("domain with no change argument reports what the app serves today", async () => {
+  const output = await appCommand(["domain", "digivaley"]);
+  assert.deepEqual(output.domains, ["https://digivaley.com"]);
+});
+
+test("--add keeps the existing domains alongside the new one", async () => {
+  const calls = recordCalls();
+  const output = await appCommand(["domain", "digivaley", "--add", "https://new.example"]);
+
+  assert.deepEqual(output.domains, ["https://digivaley.com", "https://new.example"]);
+  const update = calls().find((argv) => argv[1] === "update");
+  // Dropping the original domain here would take the live site off the internet.
+  assert.equal(update[update.indexOf("--domains") + 1], "https://digivaley.com,https://new.example");
+});
+
+test("adding a domain that is already served is a no-op that never shells out", async () => {
+  const calls = recordCalls();
+  const output = await appCommand(["domain", "digivaley", "--add", "https://digivaley.com"]);
+
+  assert.equal(output.unchanged, true);
+  assert.equal(calls().filter((argv) => argv[1] === "update").length, 0);
+});
+
+test("replacing the domain list names what it removed", async () => {
+  const output = await appCommand(["domain", "digivaley", "https://only.example"]);
+  assert.deepEqual(output.domains, ["https://only.example"]);
+  assert.deepEqual(output.removed, ["https://digivaley.com"]);
+});
+
+test("removing the last domain is refused rather than silently unrouting the app", async () => {
+  const calls = recordCalls();
+  await assert.rejects(
+    () => appCommand(["domain", "digivaley", "--remove", "https://digivaley.com"]),
+    (error) => {
+      assert.equal(error.code, "VALIDATION_ERROR");
+      assert.match(error.suggestions.join(" "), /stop routing/);
+      return true;
+    },
+  );
+  assert.equal(calls().filter((argv) => argv[1] === "update").length, 0);
+});
+
+test("--set updates an existing variable and creates a new one", async () => {
+  const calls = recordCalls();
+  const output = await appCommand([
+    "env", "digivaley",
+    "--set", "NODE_ENV=staging",
+    "--set", "NEXT_PUBLIC_APP_URL=https://new.example",
+  ]);
+
+  assert.deepEqual(output.env, [
+    { key: "NODE_ENV", updated: true },
+    { key: "NEXT_PUBLIC_APP_URL", created: true },
+  ]);
+  const verbs = calls().filter((argv) => argv[1] === "env").map((argv) => argv[2]);
+  assert.deepEqual(verbs, ["list", "update", "create"]);
+});
+
+test("--set to the value already stored is a no-op", async () => {
+  const calls = recordCalls();
+  const output = await appCommand(["env", "digivaley", "--set", "NODE_ENV=production"]);
+
+  assert.deepEqual(output.env, [{ key: "NODE_ENV", unchanged: true }]);
+  assert.equal(calls().filter((argv) => argv[2] === "update").length, 0);
+});
+
+test("--set never echoes the value back", async () => {
+  const output = await appCommand(["env", "digivaley", "--set", "API_TOKEN=super-secret"]);
+  assert.doesNotMatch(JSON.stringify(output), /super-secret/);
+});
+
+test("a --set without an = is rejected", async () => {
+  await assert.rejects(() => appCommand(["env", "digivaley", "--set", "NODE_ENV"]), (error) => {
+    assert.equal(error.code, "VALIDATION_ERROR");
+    return true;
+  });
 });
