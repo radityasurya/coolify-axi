@@ -1,6 +1,6 @@
 {
   "name": "coolify-axi",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "AXI-compliant Coolify CLI — apps, databases, services, and deployments with token-efficient TOON output",
   "keywords": [
     "axi",
