@@ -83,7 +83,8 @@ test("every noun raises NOT_FOUND on a lookup miss, so exit codes agree", async 
   // returned a "no X named Y" payload, which exits 0 — indistinguishable from a
   // hit to anything scripting on exit codes, while `app get` raised NOT_FOUND.
   const { appCommand } = await import("../src/commands/app.js");
-  const { serverCommand, serviceCommand } = await import("../src/commands/infra.js");
+  const { serverCommand } = await import("../src/commands/infra.js");
+  const { serviceCommand } = await import("../src/commands/service.js");
 
   for (const [label, run] of [
     ["db", () => dbCommand(["get", "nope"])],

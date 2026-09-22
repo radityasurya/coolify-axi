@@ -21,9 +21,10 @@ A thin, agent-ergonomic surface over the same CLI, following the ten
 
 ## What it deliberately does not do
 
-- **No resource creation or deletion.** `create`, `delete`, and destructive `update` stay in
-  the wrapped CLI and the dashboard. An agent that can delete a production database on a
-  misparsed name is a liability, and the token savings are nil.
+- **Creation and deletion stay narrow.** Only `service create` and `service delete` exist,
+  and delete refuses without `--yes`. Applications and databases keep no create or delete
+  surface: an agent that can delete a production database on a misparsed name is a
+  liability, and the token savings are nil.
 - **No interactive anything.** Every operation completes from flags alone. Commands that
   would prompt fail loudly instead.
 - **No direct REST client.** Contexts, tokens, and instance selection belong to the wrapped

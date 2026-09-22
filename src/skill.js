@@ -50,6 +50,11 @@ npx -y ${BIN} app restart <name>
 npx -y ${BIN} deploy <name>            # shorthand for \`deploy run <name>\`
 npx -y ${BIN} deploy list
 npx -y ${BIN} db get <name>
+npx -y ${BIN} service list
+npx -y ${BIN} service env <name>
+npx -y ${BIN} service restart <name>
+npx -y ${BIN} service create --list-types
+npx -y ${BIN} service delete <name> --yes   # refuses without --yes
 npx -y ${BIN} context                  # which instance am I pointed at
 \`\`\`
 
@@ -70,6 +75,8 @@ specific Coolify instance instead of the default.
   Leaving an app with zero domains is refused — Coolify would stop routing to it.
 - **\`app env --set\` is idempotent and never echoes values back.** A value already stored is
   reported \`unchanged\` without a write; changes apply on the next deployment.
+- **\`service delete\` is gated.** Without \`--yes\` it refuses, naming the service it would
+  have deleted. \`service env\` redacts and sets like \`app env\`.
 - **Logs are truncated** with a size hint; pass \`--full\` when the tail is not enough.
 - **Errors are structured** on stdout with a \`help\` block naming the fix, and an unknown
   flag exits 2 listing the valid flags. Correct the flag — do not drop the filter.

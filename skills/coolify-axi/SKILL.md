@@ -36,6 +36,11 @@ npx -y coolify-axi app restart <name>
 npx -y coolify-axi deploy <name>            # shorthand for `deploy run <name>`
 npx -y coolify-axi deploy list
 npx -y coolify-axi db get <name>
+npx -y coolify-axi service list
+npx -y coolify-axi service env <name>
+npx -y coolify-axi service restart <name>
+npx -y coolify-axi service create --list-types
+npx -y coolify-axi service delete <name> --yes   # refuses without --yes
 npx -y coolify-axi context                  # which instance am I pointed at
 ```
 
@@ -56,6 +61,8 @@ specific Coolify instance instead of the default.
   Leaving an app with zero domains is refused — Coolify would stop routing to it.
 - **`app env --set` is idempotent and never echoes values back.** A value already stored is
   reported `unchanged` without a write; changes apply on the next deployment.
+- **`service delete` is gated.** Without `--yes` it refuses, naming the service it would
+  have deleted. `service env` redacts and sets like `app env`.
 - **Logs are truncated** with a size hint; pass `--full` when the tail is not enough.
 - **Errors are structured** on stdout with a `help` block naming the fix, and an unknown
   flag exits 2 listing the valid flags. Correct the flag — do not drop the filter.

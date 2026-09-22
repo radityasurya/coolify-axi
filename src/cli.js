@@ -8,7 +8,8 @@ import { appCommand } from "./commands/app.js";
 import { contextCommand } from "./commands/context.js";
 import { dbCommand } from "./commands/db.js";
 import { deployCommand } from "./commands/deploy.js";
-import { serverCommand, serviceCommand } from "./commands/infra.js";
+import { serverCommand } from "./commands/infra.js";
+import { serviceCommand } from "./commands/service.js";
 import { setupCommand } from "./commands/setup.js";
 import { VERSION } from "./version.js";
 
@@ -21,7 +22,7 @@ export const TOP_HELP = `${encode({
     "(none)": "dashboard — every resource and its health",
     app: "list, get, logs, env, domain, start, stop, restart",
     db: "list, get",
-    service: "list, get",
+    service: "list, get, create, delete, start, stop, restart, env",
     server: "list, get",
     deploy: "run, list",
     context: "show configured Coolify instances",

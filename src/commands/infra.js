@@ -1,7 +1,7 @@
 import { coolify, health, matchOrRaise, summarize } from "../coolify.js";
 import { BIN, helpFor, makeDispatcher, parse, required, wantsHelp } from "../args.js";
 
-/** service and server are thin list/get pairs over the same shape. */
+/** server is a thin list/get pair; service grew its own command file. */
 function listGet({ noun, plural, subject, columns, detailFields }) {
   const HELP = {
     list: helpFor({
@@ -60,18 +60,6 @@ function listGet({ noun, plural, subject, columns, detailFields }) {
     },
   );
 }
-
-export const serviceCommand = listGet({
-  noun: "service",
-  plural: "services",
-  subject: "service",
-  columns: (item) => ({
-    name: item.name,
-    state: health(item.status).state,
-    uuid: item.uuid,
-  }),
-  detailFields: ["name", "uuid", "status", "description", "fqdn"],
-});
 
 export const serverCommand = listGet({
   noun: "server",
