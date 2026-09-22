@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2](https://github.com/radityasurya/coolify-axi/compare/v0.1.1...v0.1.2) (2026-09-22)
+
+
+### Features
+
+* add service lifecycle commands (create, delete, start, stop, restart, env) ([#4](https://github.com/radityasurya/coolify-axi/issues/4)) ([83c4d22](https://github.com/radityasurya/coolify-axi/commit/83c4d22f3316a9522b25453a715b3714b8210e36))
+* app domain and env writes ([f92884a](https://github.com/radityasurya/coolify-axi/commit/f92884a38c411441ce402ee78d40591cf153944a))
+
+
+### Bug Fixes
+
+* raise NOT_FOUND on a lookup miss for db, service, and server ([ebfe68a](https://github.com/radityasurya/coolify-axi/commit/ebfe68a2234a59cf48b6c72e56fa2e46ac4428b6))
+
 ## [0.1.1](https://github.com/radityasurya/coolify-axi/compare/v0.1.0...v0.1.1) (2026-09-02)
 
 
