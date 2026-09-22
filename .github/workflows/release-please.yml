@@ -3,6 +3,10 @@ name: release-please
 on:
   push:
     branches: [main]
+  # Lets a manifest/tag drift (release-please's version pointer falling behind
+  # the last real tag) be recovered by re-running this workflow, instead of
+  # needing a throwaway push to main just to re-trigger it.
+  workflow_dispatch: {}
 
 permissions:
   contents: write
