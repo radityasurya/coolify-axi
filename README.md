@@ -107,6 +107,10 @@ coolify-axi db get blogs-pg             # connection details, secrets redacted
 coolify-axi db get blogs-pg --reveal
 
 coolify-axi service list
+coolify-axi service env cAdvisor            # secrets redacted; --set KEY=VALUE to change
+coolify-axi service restart cAdvisor
+coolify-axi service create --list-types     # every valid one-click type
+coolify-axi service delete cAdvisor --yes   # refuses without --yes
 coolify-axi server list
 coolify-axi context                     # configured instances, and which is active
 coolify-axi update --check              # is a newer release available?
@@ -119,7 +123,7 @@ coolify-axi update --check              # is a newer release available?
 | *(none)* | — | Dashboard: every resource, its type, and its state |
 | `app` | `list`, `get`, `logs`, `env`, `start`, `stop`, `restart` | Applications |
 | `db` | `list`, `get` | Databases, with redacted connection details |
-| `service` | `list`, `get` | One-click services |
+| `service` | `list`, `get`, `create`, `delete`, `start`, `stop`, `restart`, `env` | One-click services; delete is `--yes`-gated |
 | `server` | `list`, `get` | Connected servers |
 | `deploy` | `run`, `list` | Trigger and watch deployments |
 | `context` | — | Which Coolify instance commands target |
@@ -143,11 +147,17 @@ Like the AXI SDK's other tools, flags must come **after** the command
 
 - **Names, not uuids.** Every command accepts a resource name or a uuid. An ambiguous name
   stops and lists the candidates rather than acting on the wrong resource.
-- **Secrets are redacted by default.** `app env` and `db get` mask secret-shaped values, and
-  scrub passwords embedded in connection URLs such as `postgres://user:pw@host/db`. `--reveal`
-  opts in, and threads `--show-sensitive` through to the wrapped CLI.
-- **Idempotent state changes.** `app start` and `app stop` exit 0 as a no-op when the app is
-  already in the target state, so agents declare intent instead of reading first.
+- **Secrets are redacted by default.** `app env`, `service env`, and `db get` mask
+  secret-shaped values, and scrub passwords embedded in connection URLs such as
+  `postgres://user:pw@host/db`. `--reveal` opts in, and threads `--show-sensitive` through to
+  the wrapped CLI.
+- **Idempotent state changes.** `app start`/`stop` and `service start`/`stop` exit 0 as a
+  no-op when the resource is already in the target state, so agents declare intent instead of
+  reading first.
+- **Destructive commands ask first.** `service delete` refuses to run without `--yes`. Without
+  it, the command names the resource, its uuid, and what deletion removes, then exits 2 with
+  no call reaching the wrapped CLI. `--yes` passes `--force` through so it never prompts
+  interactively either.
 - **Truncation with an escape hatch.** Logs are capped with a size hint and a `--full` pointer,
   so one noisy container cannot consume the context budget.
 - **Fails loud.** An unknown flag exits 2 and names that subcommand's valid flags inline, so

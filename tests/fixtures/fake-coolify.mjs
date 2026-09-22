@@ -33,6 +33,7 @@ const DATABASES = [
 
 const SERVICES = [
   { uuid: "svc1".padEnd(24, "x"), name: "cAdvisor", status: "running:healthy", description: "" },
+  { uuid: "svc2".padEnd(24, "x"), name: "umami", status: "exited:unhealthy", description: "analytics" },
 ];
 const SERVERS = [
   { uuid: "srv1".padEnd(24, "x"), name: "localhost", ip: "host.docker.internal", user: "root", port: 22 },
@@ -42,8 +43,17 @@ const TABLE = {
   "resource list": RESOURCES,
   "service list": SERVICES,
   "server list": SERVERS,
-  [`service get ${SERVICES[0].uuid}`]: SERVICES[0],
+  [`service get ${SERVICES[0].uuid}`]: { ...SERVICES[0], docker_compose: "services:\n  cadvisor:\n    image: gcr.io/cadvisor/cadvisor" },
+  [`service get ${SERVICES[1].uuid}`]: SERVICES[1],
   [`server get ${SERVERS[0].uuid}`]: SERVERS[0],
+  [`service start ${SERVICES[1].uuid}`]: { message: "starting" },
+  [`service stop ${SERVICES[0].uuid}`]: { message: "stopping" },
+  [`service restart ${SERVICES[0].uuid}`]: { message: "restarting" },
+  [`service env list ${SERVICES[0].uuid}`]: [
+    { key: "PORT", value: "8080", is_build_time: false },
+    { key: "SERVICE_API_TOKEN", value: "hunter2", is_build_time: false },
+    { key: "DATABASE_URL", value: "postgres://svc:hunter2@db/svc", is_build_time: false },
+  ],
   "database list": DATABASES,
   [`database get ${DATABASES[0].uuid}`]: DATABASES[0],
   [`app get ${RESOURCES[0].uuid}`]: {
@@ -92,9 +102,22 @@ const PLAIN_TEXT = new Set([
   `app env create ${RESOURCES[0].uuid}`,
   `app env update ${RESOURCES[0].uuid} NODE_ENV`,
   `app env update ${RESOURCES[0].uuid} DATABASE_PASSWORD`,
+  `service create n8n`,
+  `service delete ${SERVICES[0].uuid}`,
+  `service env create ${SERVICES[0].uuid}`,
+  `service env update ${SERVICES[0].uuid} PORT`,
+  `service env update ${SERVICES[0].uuid} SERVICE_API_TOKEN`,
 ]);
+// `service create --list-types` answers with a plain-text catalogue, even with
+// --format json — so the wrapper reads it as text.
+if (key === "service create") {
+  process.stdout.write("Available one-click service types:\n\n  ghost\n  n8n\n  wordpress-with-mysql\n");
+  process.exit(0);
+}
 if (PLAIN_TEXT.has(key)) {
-  process.stdout.write("Environment variable updated successfully\n");
+  process.stdout.write(
+    key.startsWith("service") ? "Service command completed successfully\n" : "Environment variable updated successfully\n",
+  );
   process.exit(0);
 }
 
