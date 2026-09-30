@@ -28,11 +28,28 @@ token string is scrubbed from every error. Reach for it only when the CLI cannot
 
 `redact()`/`redactValue()` decide from a name. Log lines are free text, so
 `redactLogText()` masks by shape: secret-named `KEY=VALUE` / `KEY: VALUE`, **every**
-`--build-arg` and `ARG` value (Coolify passes all env vars that way, `DATABASE_URL`
-included), credentialed URLs anywhere in a line, bearer headers, and known token prefixes.
+`--build-arg`, `ARG`, and `docker -e`/`--env` value (Coolify passes all env vars that
+way, `DATABASE_URL` included), PEM private-key blocks, credentialed URLs anywhere in a line
+(user-only userinfo too), bearer/basic headers, and known token prefixes (AWS key ids included).
 Every command that prints a log line routes through it, and logs deliberately have no
 `--reveal`. When a live log shows a new leak shape, add it to `tests/fixtures/deployment-log.mjs`
 first.
+
+## Wrapped-CLI errors are free text too (`src/coolify.js#translate`)
+
+A failed child's stderr goes through `redactLogText()` before it becomes an error, and the
+`while running` hint names only the subcommand path, never flag values. execFile's own
+`Command failed: <full argv>` message is replaced by the exit code, because a write's argv
+carries `--value <secret>`. Writes that carry a secret still wrap the call in
+`scrubbed(secrets, ...)`: a value with an innocent name has no shape to redact on.
+
+## `app env set` vs legacy `app env --set`
+
+Legacy `--set` passes no build-time flag, so it keeps upstream's behaviour (a new variable
+is build-time and runtime; an update keeps the stored setting). `env set` makes a new
+variable runtime-only unless `--build`, and an update keeps the stored setting — flipping
+an existing `NEXT_PUBLIC_*` to runtime-only would break the next build silently. Values go
+as `--value=<v>` so a leading `-` is never read as a flag.
 
 ## Toolchain differs from gh-axi deliberately
 

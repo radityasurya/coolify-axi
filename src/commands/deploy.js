@@ -109,18 +109,24 @@ async function appDeployments(found, options) {
   );
 }
 
-async function getDeployment(uuid, options) {
+async function getDeployment(found, uuid, options) {
   const result = await jsonOrText(["deploy", "get", uuid], options);
   const deployment = Array.isArray(result) ? result[0] : result;
   if (!deployment || typeof deployment !== "object") {
-    throw new AxiError(`no deployment ${uuid}`, "NOT_FOUND", [`Run \`${BIN} deploy history <app>\` to list deployment uuids`]);
+    throw new AxiError(`no deployment ${uuid}`, "NOT_FOUND", [`Run \`${BIN} deploy history ${found.name}\` to list deployment uuids`]);
+  }
+  // A uuid from another app would otherwise be reported under this app's name.
+  if (deployment.application_name && deployment.application_name !== found.name) {
+    throw new AxiError(`deployment ${uuid} belongs to ${deployment.application_name}, not ${found.name}`, "VALIDATION_ERROR", [
+      `Run \`${BIN} deploy logs ${deployment.application_name} ${uuid}\``,
+    ]);
   }
   return deployment;
 }
 
 /** The given deployment, or the app's latest. */
 async function pick(found, uuid, options) {
-  if (uuid) return getDeployment(uuid, options);
+  if (uuid) return getDeployment(found, uuid, options);
   const [latest] = await appDeployments(found, options);
   if (!latest) {
     throw new AxiError(`${found.name} has no deployments`, "NOT_FOUND", [`Run \`${BIN} deploy ${found.name}\` to start one`]);
@@ -221,7 +227,7 @@ async function waitFor(found, uuid, values, options) {
   const timeout = positiveInt(values.timeout, "--timeout", 300);
   const start = timing.now();
   for (;;) {
-    const deployment = await getDeployment(uuid, options);
+    const deployment = await getDeployment(found, uuid, options);
     if (!IN_FLIGHT.has(deployment.status)) {
       const summary = report(found, deployment);
       return {
@@ -276,13 +282,14 @@ async function run(argv) {
     (typeof result === "string" ? result.match(/deployment[_ ]uuid\W+([a-z0-9]{8,})/i)?.[1] : undefined);
 
   if (values.wait) {
-    if (!uuid && found.type !== "application") {
+    // No fallback to "latest": right after a trigger that can still be the
+    // previous, finished deployment, and its result would be reported as this one's.
+    if (!uuid) {
       throw new AxiError(`the deployment of ${found.name} started, but its uuid was not reported`, "COOLIFY_ERROR", [
-        `Run \`${BIN} deploy list\` to find it`,
+        `Run \`${BIN} deploy list\` to find it, then \`${BIN} deploy watch ${found.name} <uuid>\``,
       ]);
     }
-    const target = uuid ?? (await pick(found, undefined, options)).deployment_uuid;
-    return waitFor(found, target, values, options);
+    return waitFor(found, uuid, values, options);
   }
 
   return {

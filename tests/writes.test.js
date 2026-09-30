@@ -123,9 +123,47 @@ test("env set creates and updates runtime-only, and never echoes values", async 
   ]);
   for (const secret of [stripe, "hunter2", "staging"]) assert.ok(!text(output).includes(secret));
   const writes = calls().filter((argv) => argv[1] === "env" && argv[2] !== "list");
-  assert.deepEqual(writes[0].slice(0, 6), ["app", "env", "update", APP, "NODE_ENV", "--value"]);
-  assert.ok(writes[0].includes("--build-time=false") && writes[0].includes("--runtime=true"));
-  assert.ok(writes[1].includes("create") && writes[1].includes(`--value`));
+  assert.deepEqual(writes[0].slice(0, 6), ["app", "env", "update", APP, "NODE_ENV", "--value=staging"]);
+  // An update keeps the stored build-time setting; a create is runtime-only.
+  assert.ok(!writes[0].some((a) => a.startsWith("--build-time")));
+  assert.ok(writes[1].includes("create") && writes[1].includes(`--value=${stripe}`) && writes[1].includes("--build-time=false"));
+});
+
+test("legacy env --set keeps upstream build-time defaults and scrubs every error", async () => {
+  const calls = recordCalls();
+  await appCommand(["env", "digivaley", "--set", "NEW_KEY=abc123value"]);
+  const create = calls().find((argv) => argv[2] === "create");
+  assert.ok(!create.some((a) => a.startsWith("--build-time")), "legacy --set passes no build flag");
+  // The list call fails before any write; its error must still be scrubbed.
+  failWith("list broke near abc123value");
+  await assert.rejects(
+    () => appCommand(["env", "digivaley", "--set", "NEW_KEY=abc123value"]),
+    (error) => !text({ m: error.message, s: error.suggestions }).includes("abc123value"),
+  );
+});
+
+test("a failed child with no stderr never echoes argv flag values", async () => {
+  process.env.FAKE_COOLIFY_SILENT_FAIL = "app update";
+  try {
+    await assert.rejects(
+      () => appCommand(["domain", "digivaley", "--add", "https://x.example"]),
+      (error) => {
+        const all = text({ m: error.message, s: error.suggestions });
+        assert.ok(!all.includes("x.example"), all);
+        return true;
+      },
+    );
+  } finally {
+    delete process.env.FAKE_COOLIFY_SILENT_FAIL;
+  }
+});
+
+test("secret-shaped child stderr is redacted even with no value to scrub", async () => {
+  failWith("connect failed: postgres://u:hunter2@db/x PASSWORD=hunter2");
+  await assert.rejects(
+    () => appCommand(["get", "digivaley"]),
+    (error) => !text({ m: error.message, s: error.suggestions }).includes("hunter2"),
+  );
 });
 
 test("env set --build makes the variable build-time", async () => {
@@ -211,6 +249,11 @@ test("db create validation and lookup misses", async () => {
   await assert.rejects(() => dbCommand(["create", "postgres", "x", "--server", "s", "--project", "p", "--public-port", "abc"]), (e) => e.code === "VALIDATION_ERROR");
   assert.equal(calls().length, 0);
   await assert.rejects(() => dbCommand(["create", "postgres", "x", "--server", "nope", "--project", "blog"]), (e) => e.code === "NOT_FOUND");
+  // There is no `project list` command here, so the miss names the projects inline.
+  await assert.rejects(
+    () => dbCommand(["create", "postgres", "x", "--server", "localhost", "--project", "nope"]),
+    (e) => e.code === "NOT_FOUND" && e.suggestions.some((s) => s === "1 projects: blog") && !e.suggestions.some((s) => /project list/.test(s)),
+  );
 });
 
 test("app create from a public URL", async () => {

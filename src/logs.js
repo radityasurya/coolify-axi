@@ -21,11 +21,21 @@ const RULES = [
     `$1$2=${MASK}`,
   ],
   [/\b(ARG\s+[A-Za-z_]\w*)=("[^"]*"|'[^']*'|\S+)/g, `$1=${MASK}`],
+  // `docker run -e KEY=v` / `--env KEY=v`: same reasoning as build args.
+  [
+    new RegExp(String.raw`((?:^|\s)(?:-e|--env)[ =]+(?:'\\''|["'])?)([A-Za-z_]\w*)=(${SHELL_QUOTED}|"[^"]*"|'[^']*'|[^\s"']*)`, "g"),
+    `$1$2=${MASK}`,
+  ],
+  // PEM private keys span lines; an unterminated block is masked to the end of the text.
+  [/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g, `$1${MASK}$2`],
   // Credentialed URLs anywhere in a line (URL_CREDENTIALS without the ^ anchor; user may be empty).
   [/([a-z][a-z0-9+.-]*:\/\/[^:/@\s]*:)([^@\s]+)(@)/gi, `$1${MASK}$3`],
+  // User-only userinfo is a credential too (Sentry DSNs, token-as-user git URLs).
+  [/([a-z][a-z0-9+.-]*:\/\/)(?!<redacted>)([^:/@\s]+)(@)/gi, `$1${MASK}$3`],
   // Token shapes that are secrets regardless of what precedes them.
   [/\b(?:[sr]k|pk)_(?:live|test)_[A-Za-z0-9]{8,}/g, MASK],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_\w{20,}|\bxox[abprs]-[\w-]{10,}/g, MASK],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, MASK],
   [/\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, MASK],
   [/\b(Bearer|Basic)\s+(?!<)[A-Za-z0-9._~+/=-]{8,}/g, `$1 ${MASK}`],
   // KEY=VALUE, KEY: VALUE, "key": "value" — including `Authorization: Bearer x`.

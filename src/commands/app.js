@@ -73,10 +73,13 @@ const HELP = {
       `${BIN} app env delete <name|uuid> KEY [KEY2 ...]`,
     flags: {
       "--reveal": "Print secret values in clear text (list only)",
-      "--build": "set: also make the variable available at build time (default: runtime only)",
-      "--set": "Legacy form of `env set`: KEY=VALUE, repeatable",
+      "--build": "set: make the variable available at build time too. Without it, a new variable is runtime-only and an existing one keeps its build-time setting",
+      "--set": "Legacy form: KEY=VALUE, repeatable. Uses upstream defaults: a new variable is build-time AND runtime",
     },
-    notes: "Values are never echoed back, and are masked out of any error text. A value already stored is a no-op.",
+    notes:
+      "Values are never echoed back, and are masked out of any error text. A value already stored is a no-op. " +
+      "Build-time values are passed to the build as --build-arg and baked into the image, so keep secrets runtime-only. " +
+      "To make a build-time variable runtime-only, delete it and set it again.",
     examples: [
       `${BIN} app env digivaley`,
       `${BIN} app env set digivaley NEXT_PUBLIC_APP_URL=https://new.example`,
@@ -271,6 +274,16 @@ async function env(argv) {
   const selector = required(positionals[0], "<name|uuid>", "app env", `${BIN} app env digivaley`);
   const options = { context: values.context };
 
+  // Legacy `--set`: keeps its original behaviour (upstream build-time defaults),
+  // but every error on the path is scrubbed of the values it carries.
+  if (values.set?.length) {
+    return await scrubbed(values.set.map(valueOf), async () => {
+      const found = await resolveResource(selector, { ...options, type: TYPE });
+      const vars = await coolify(["app", "env", "list", found.uuid], options);
+      return await setEnv(found, Array.isArray(vars) ? vars : [], values.set, options, undefined);
+    });
+  }
+
   const found = await resolveResource(selector, { ...options, type: TYPE });
   // The wrapped CLI masks values as `********` unless asked; --reveal has to
   // reach it, or it returns asterisks instead of the value.
@@ -279,8 +292,6 @@ async function env(argv) {
     options,
   );
   const rows = Array.isArray(vars) ? vars : [];
-
-  if (values.set?.length) return await setEnv(found, rows, values.set, options, false);
 
   if (rows.length === 0) {
     return { app: found.name, env: `0 environment variables set on ${found.name}` };
@@ -319,9 +330,13 @@ const valueOf = (pair) => pair.slice(pair.indexOf("=") + 1);
 /**
  * Create or update each KEY=VALUE. Values are compared against the current set
  * so a re-run is a no-op, and are never echoed back — several of these are
- * secrets and the output is what an agent pastes into a summary. Runtime-only
- * unless `build` is set; upstream defaults build-time to true, so it is always
- * passed explicitly.
+ * secrets and the output is what an agent pastes into a summary.
+ *
+ * `build`: undefined = legacy `--set`, no build flag (upstream: create is
+ * build-time, update keeps the stored setting); false = `env set` default,
+ * create runtime-only, update keeps the stored setting; true = build-time.
+ * Keeping the setting on update matters: flipping an existing NEXT_PUBLIC_*
+ * var to runtime-only would silently break the next build.
  */
 async function setEnv(found, rows, pairs, options, build) {
   const current = new Map(rows.map((entry) => [entry.key, entry]));
@@ -339,16 +354,17 @@ async function setEnv(found, rows, pairs, options, build) {
 
   for (const [key, value] of parsed) {
     const existing = current.get(key);
-    if (existing && existing.value === value && Boolean(existing.is_build_time) === build) {
+    if (existing && existing.value === value && (!build || existing.is_build_time)) {
       applied.push({ key, unchanged: true });
       continue;
     }
     // The listing masks secrets as `********` unless --show-sensitive, so an
     // unchanged secret may not be detectable — writing it again is the safe way round.
-    const flags = [`--build-time=${build}`, "--runtime=true"];
+    const flags = build ? ["--build-time=true"] : build === false && !existing ? ["--build-time=false"] : [];
+    // `--value=` so a value starting with `-` is never read as a flag.
     const args = existing
-      ? ["app", "env", "update", found.uuid, key, "--value", value, ...flags]
-      : ["app", "env", "create", found.uuid, "--key", key, "--value", value, ...flags];
+      ? ["app", "env", "update", found.uuid, key, `--value=${value}`, ...flags]
+      : ["app", "env", "create", found.uuid, "--key", key, `--value=${value}`, ...flags];
     // These writes answer with a plain-text confirmation, not JSON, and the
     // payload is unused either way — parsing it would fail a successful write.
     await scrubbed(secrets, () => coolify(args, { ...options, json: false }));
@@ -526,7 +542,8 @@ async function create(argv) {
   const port = positiveInt(values.port, "--port", 3000);
   const isUrl = /^([a-z][a-z0-9+.-]*:\/\/|git@)/i.test(values.repo);
   if (!isUrl && !values["github-app"]) {
-    throw new AxiError(`--repo ${values.repo} is not a URL, so a GitHub App is needed to read it`, "VALIDATION_ERROR", [
+    // The repo is not echoed: a malformed `user:token@host/x` would print its token.
+    throw new AxiError("--repo is not a URL, so a GitHub App is needed to read it", "VALIDATION_ERROR", [
       "Pass --github-app <name|uuid>, or give the full git URL for a public repository",
     ]);
   }
@@ -538,7 +555,7 @@ async function create(argv) {
   const placement = await resolvePlacement(values, options);
   const source = [];
   if (values["github-app"]) {
-    const gh = matchOrRaise(await coolify(["github", "list"], options), values["github-app"], "github app");
+    const gh = matchOrRaise(await coolify(["github", "list"], options), values["github-app"], "github app", { list: false });
     source.push("github", "--github-app-uuid", gh.uuid);
   } else {
     source.push("public");

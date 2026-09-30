@@ -124,6 +124,9 @@ if (process.env.FAKE_COOLIFY_LOG) {
   appendFileSync(process.env.FAKE_COOLIFY_LOG, `${JSON.stringify(argv)}\n`);
 }
 
+// Exit 1 with only the banner on stderr, so the wrapper sees execFile's own
+// "Command failed: <argv>" message — the path that used to echo flag values.
+if (process.env.FAKE_COOLIFY_SILENT_FAIL && key.startsWith(process.env.FAKE_COOLIFY_SILENT_FAIL)) process.exit(1);
 if (process.env.FAKE_COOLIFY_FAIL) {
   process.stderr.write(`Error: ${process.env.FAKE_COOLIFY_FAIL}\n`);
   process.exit(1);

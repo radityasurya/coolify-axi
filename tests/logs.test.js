@@ -46,6 +46,22 @@ test("redactLogText masks KEY=VALUE, KEY: VALUE, bearer headers, and credentiale
   }
 });
 
+test("redactLogText masks docker -e values, PEM keys, AWS key ids, and user-only URL credentials", () => {
+  const cases = [
+    ["docker run -e DATABASE_URL=hunter2 --rm img", /-e DATABASE_URL=<redacted> --rm img/],
+    ["docker run --env PLAIN=hunter2 img", /--env PLAIN=<redacted> img/],
+    ["-----BEGIN RSA PRIVATE KEY-----\nMIIhunter2\nAAAhunter2\n-----END RSA PRIVATE KEY-----", /BEGIN RSA PRIVATE KEY-----<redacted>-----END/],
+    ["key: -----BEGIN OPENSSH PRIVATE KEY-----\nb3Blhunter2", /PRIVATE KEY-----<redacted>$/],
+    ["aws_access_key_id \u0041KIAIOSFODNN7HUNTER2", /aws_access_key_id <redacted>/],
+    ["SENTRY_DSN is https://hunter2abc@o1.ingest.sentry.io/1", /https:\/\/<redacted>@o1/],
+  ];
+  for (const [input, expected] of cases) {
+    const out = redactLogText(input);
+    assert.match(out, expected, input);
+    assert.ok(!/hunter2|HUNTER2/.test(out), input);
+  }
+});
+
 test("redactLogText leaves ordinary log lines alone", () => {
   for (const line of [
     "GET /api/health 200 in 12ms",

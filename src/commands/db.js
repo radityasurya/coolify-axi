@@ -83,7 +83,7 @@ async function get(argv) {
   // Databases are not in `resource list` under a single type, so match the
   // database listing directly rather than through resolveResource.
   const rows = await coolify(["database", "list"], options);
-  const found = matchOrRaise(rows, selector, "database");
+  const found = matchOrRaise(rows, selector, "database", { list: "db list" });
 
   const detail = await coolify(
     ["database", "get", found.uuid, ...(values.reveal ? ["--show-sensitive"] : [])],

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { AxiError } from "axi-sdk-js";
 import { BIN } from "./args.js";
+import { redactLogText } from "./logs.js";
 
 const exec = promisify(execFile);
 
@@ -29,6 +30,12 @@ function meaningfulStderr(stderr = "") {
     .trim();
 }
 
+/** The subcommand path only: flag values (`--value <secret>`) never reach an error. */
+function commandPath(argv) {
+  const end = argv.findIndex((arg) => arg.startsWith("-"));
+  return argv.slice(0, end < 0 ? argv.length : end).join(" ");
+}
+
 function translate(error, argv) {
   if (error.code === "ENOENT") {
     return new AxiError("the `coolify` CLI is not installed or not on PATH", "MISSING_DEPENDENCY", [
@@ -36,8 +43,12 @@ function translate(error, argv) {
       "Or point COOLIFY_AXI_BIN at the binary",
     ]);
   }
-  const detail = meaningfulStderr(error.stderr) || error.message;
-  const cleaned = detail.replace(/^Error:\s*/i, "").split("\n")[0];
+  // Child stderr and execFile's message (which embeds the full argv) are free
+  // text that can carry a secret, so they get the log redactor too.
+  const detail =
+    meaningfulStderr(error.stderr) ||
+    (/^Command failed:/.test(error.message) ? `exited with code ${error.code ?? "unknown"}` : error.message);
+  const cleaned = redactLogText(detail.replace(/^Error:\s*/i, "").split("\n")[0]);
 
   if (/unauthor|401|invalid token|authentication/i.test(cleaned)) {
     return new AxiError(cleaned, "AUTH_ERROR", [
@@ -51,7 +62,7 @@ function translate(error, argv) {
   if (/context/i.test(cleaned)) {
     return new AxiError(cleaned, "VALIDATION_ERROR", ["Run `coolify-axi context` to list configured instances"]);
   }
-  return new AxiError(cleaned, "COOLIFY_ERROR", [`while running \`coolify ${argv.join(" ")}\``]);
+  return new AxiError(cleaned, "COOLIFY_ERROR", [`while running \`coolify ${commandPath(argv)}\``]);
 }
 
 /**
@@ -76,7 +87,7 @@ export async function coolify(args, options = {}) {
     return JSON.parse(trimmed);
   } catch {
     throw new AxiError("the `coolify` CLI returned output that is not JSON", "COOLIFY_ERROR", [
-      `while running \`coolify ${argv.join(" ")}\``,
+      `while running \`coolify ${commandPath(argv)}\``,
       "Upgrade the CLI with `coolify update` if this persists",
     ]);
   }
@@ -151,7 +162,7 @@ export function summarize(items, field = "status") {
  * returning a "not found" payload would exit 0 and make a miss indistinguishable
  * from a hit to anything scripting on exit codes.
  */
-export function matchOrRaise(rows, selector, subject) {
+export function matchOrRaise(rows, selector, subject, { list = `${subject} list` } = {}) {
   const wanted = String(selector).toLowerCase();
   const found =
     rows.find((item) => item.uuid === selector) ??
@@ -162,9 +173,13 @@ export function matchOrRaise(rows, selector, subject) {
     .filter((item) => String(item.name).toLowerCase().includes(wanted))
     .slice(0, 5)
     .map((item) => `Run with ${item.name}`);
+  // Nouns this CLI has no `list` for (projects, GitHub Apps) name the options inline.
+  const names = rows.map((item) => item.name);
   throw new AxiError(`no ${subject} named ${selector}`, "NOT_FOUND", [
     ...near,
-    `Run \`${BIN} ${subject} list\` to see all ${rows.length}`,
+    list
+      ? `Run \`${BIN} ${list}\` to see all ${rows.length}`
+      : `${rows.length} ${subject}s: ${names.slice(0, 20).join(", ") || "none"}${names.length > 20 ? ", …" : ""}`,
   ]);
 }
 
@@ -226,7 +241,7 @@ export async function scrubbed(secrets, run) {
  */
 export async function resolvePlacement(values, options) {
   const server = matchOrRaise(await coolify(["server", "list"], options), values.server, "server");
-  const project = matchOrRaise(await coolify(["project", "list"], options), values.project, "project");
+  const project = matchOrRaise(await coolify(["project", "list"], options), values.project, "project", { list: false });
   return ["--server-uuid", server.uuid, "--project-uuid", project.uuid, "--environment-name", values.environment ?? "production"];
 }
 

@@ -71,6 +71,13 @@ test("deploy logs --full --debug prints the whole redacted log, repeats collapse
   assertNoSecrets(output);
 });
 
+test("deploy logs refuses a deployment uuid that belongs to another app", async () => {
+  await assert.rejects(
+    () => deployCommand(["logs", "karja-nl", "depfail1"]),
+    (error) => error.code === "VALIDATION_ERROR" && /belongs to digivaley/.test(error.message),
+  );
+});
+
 test("deploy logs has no --reveal", async () => {
   await assert.rejects(() => deployCommand(["logs", "digivaley", "--reveal"]), (error) => error.code === "VALIDATION_ERROR");
 });
