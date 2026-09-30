@@ -20,11 +20,11 @@ export const TOP_HELP = `${encode({
   usage: `${BIN} [command] [args] [flags]`,
   commands: {
     "(none)": "dashboard — every resource and its health",
-    app: "list, get, logs, env, domain, start, stop, restart",
-    db: "list, get",
+    app: "list, get, create, set, logs, env (set, delete), domain, start, stop, restart",
+    db: "list, get, create",
     service: "list, get, create, delete, start, stop, restart, env",
     server: "list, get",
-    deploy: "run, list",
+    deploy: "run, list, history, logs, watch",
     context: "show configured Coolify instances",
     setup: "hooks, status, uninstall",
   },
@@ -33,9 +33,12 @@ export const TOP_HELP = `${encode({
   examples: [
     BIN,
     `${BIN} app logs digivaley`,
-    `${BIN} deploy digivaley`,
+    `${BIN} deploy digivaley --wait`,
+    `${BIN} deploy logs digivaley`,
     `${BIN} db get blogs-pg`,
     `${BIN} app list --status exited`,
+    `${BIN} app env set digivaley KEY=value`,
+    `${BIN} app set digivaley --pre-deploy "pnpm db:migrate"`,
   ],
   help: [`Run \`${BIN} <command> --help\` for a command reference`],
 })}\n`;

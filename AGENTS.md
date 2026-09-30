@@ -9,9 +9,47 @@ test, release, architecture, and sharp-edge notes that should travel with the co
 
 `coolify-axi` wraps the official [`coolify`](https://github.com/coollabsio/coolify-cli) Go
 CLI, the way `gh-axi` wraps `gh`. It shells out with `--format json`, projects the result
-down to an agent-sized schema, and renders TOON through `axi-sdk-js`. There is no direct
+down to an agent-sized schema, and renders TOON through `axi-sdk-js`. There is no general
 Coolify REST client here on purpose: the wrapped CLI already owns contexts, tokens, and
-instance selection, and reimplementing that would fork the auth story.
+instance selection, and reimplementing that would fork the auth story. The one narrow
+exception is described below.
+
+## The one REST exception (`src/api.js`)
+
+The wrapped CLI has no flag for some settings an agent must change (pre-deployment
+commands, among others), so `api(method, path, body, { context })` calls
+`/api/v1` directly. It reads the instance and token from the CLI's own
+`~/.config/coolify/config.json` (`COOLIFY_AXI_CONFIG` overrides the path for tests), so
+contexts still have one owner. The token goes into the `Authorization` header and nowhere
+else: errors carry only a redacted `message` from the body, never the raw body, and the
+token string is scrubbed from every error. Reach for it only when the CLI cannot do the job.
+
+## Logs have no field names to redact on (`src/logs.js`)
+
+`redact()`/`redactValue()` decide from a name. Log lines are free text, so
+`redactLogText()` masks by shape: secret-named `KEY=VALUE` / `KEY: VALUE`, **every**
+`--build-arg`, `ARG`, and `docker -e`/`--env` value (Coolify passes all env vars that
+way, `DATABASE_URL` included), PEM private-key blocks, credentialed URLs anywhere in a line
+(user-only userinfo too), bearer/basic headers, and known token prefixes (AWS key ids included).
+Every command that prints a log line routes through it, and logs deliberately have no
+`--reveal`. When a live log shows a new leak shape, add it to `tests/fixtures/deployment-log.mjs`
+first.
+
+## Wrapped-CLI errors are free text too (`src/coolify.js#translate`)
+
+A failed child's stderr goes through `redactLogText()` before it becomes an error, and the
+`while running` hint names only the subcommand path, never flag values. execFile's own
+`Command failed: <full argv>` message is replaced by the exit code, because a write's argv
+carries `--value <secret>`. Writes that carry a secret still wrap the call in
+`scrubbed(secrets, ...)`: a value with an innocent name has no shape to redact on.
+
+## `app env set` vs legacy `app env --set`
+
+Legacy `--set` passes no build-time flag, so it keeps upstream's behaviour (a new variable
+is build-time and runtime; an update keeps the stored setting). `env set` makes a new
+variable runtime-only unless `--build`, and an update keeps the stored setting — flipping
+an existing `NEXT_PUBLIC_*` to runtime-only would break the next build silently. Values go
+as `--value=<v>` so a leading `-` is never read as a flag.
 
 ## Toolchain differs from gh-axi deliberately
 

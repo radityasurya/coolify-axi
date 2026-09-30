@@ -1,5 +1,6 @@
-import { coolify, health, matchOrRaise, redact, summarize } from "../coolify.js";
-import { BIN, helpFor, makeDispatcher, parse, required, wantsHelp } from "../args.js";
+import { coolify, health, matchOrRaise, pick, redact, resolvePlacement, summarize } from "../coolify.js";
+import { AxiError } from "axi-sdk-js";
+import { BIN, helpFor, makeDispatcher, parse, positiveInt, required, wantsHelp } from "../args.js";
 
 const TYPE_PREFIX = ["postgresql", "mysql", "mariadb", "mongodb", "redis", "keydb", "dragonfly", "clickhouse"];
 
@@ -16,6 +17,20 @@ const HELP = {
     usage: `${BIN} db get <name|uuid> [--reveal]`,
     flags: { "--reveal": "Print passwords and connection strings in clear text" },
     examples: [`${BIN} db get blogs-pg`, `${BIN} db get blogs-pg --reveal`],
+  }),
+  create: helpFor({
+    command: "db create",
+    description: "Create a database; Coolify generates the password, and it is never printed",
+    usage:
+      `${BIN} db create postgres|redis <name> --server <name|uuid> --project <name|uuid> ` +
+      `[--environment <name>] [--image <image>] [--public-port <n>] [--instant-deploy]`,
+    flags: {
+      "--environment": "Environment name (default production)",
+      "--image": "Image and tag, for example postgres:18",
+      "--public-port": "Expose the database on this host port (makes it public)",
+      "--instant-deploy": "Start it right after creating",
+    },
+    examples: [`${BIN} db create postgres blogs-pg --server localhost --project blog --instant-deploy`],
   }),
 };
 
@@ -68,7 +83,7 @@ async function get(argv) {
   // Databases are not in `resource list` under a single type, so match the
   // database listing directly rather than through resolveResource.
   const rows = await coolify(["database", "list"], options);
-  const found = matchOrRaise(rows, selector, "database");
+  const found = matchOrRaise(rows, selector, "database", { list: "db list" });
 
   const detail = await coolify(
     ["database", "get", found.uuid, ...(values.reveal ? ["--show-sensitive"] : [])],
@@ -86,14 +101,60 @@ async function get(argv) {
   };
 }
 
+const ENGINES = { postgres: "postgresql", redis: "redis" };
+
+async function create(argv) {
+  if (wantsHelp(argv)) return HELP.create;
+  const { values, positionals } = parse(argv, {
+    command: "db create",
+    flags: {
+      server: { type: "string" },
+      project: { type: "string" },
+      environment: { type: "string" },
+      image: { type: "string" },
+      "public-port": { type: "string" },
+      "instant-deploy": { type: "boolean" },
+    },
+  });
+  const example = `${BIN} db create postgres blogs-pg --server localhost --project blog`;
+  const engine = required(positionals[0], "<postgres|redis>", "db create", example);
+  if (!(engine in ENGINES)) {
+    throw new AxiError(`unsupported engine ${engine}`, "VALIDATION_ERROR", [`valid engines: ${Object.keys(ENGINES).join(", ")}`]);
+  }
+  const name = required(positionals[1], "<name>", "db create", example);
+  for (const flag of ["server", "project"]) required(values[flag], `--${flag}`, "db create", example);
+  const publicPort = values["public-port"] === undefined ? undefined : positiveInt(values["public-port"], "--public-port");
+  const options = { context: values.context };
+
+  const placement = await resolvePlacement(values, options);
+  // No password flags on purpose: Coolify generates one and it stays server-side.
+  const created = await coolify(
+    [
+      "database", "create", ENGINES[engine], ...placement, "--name", name,
+      ...(values.image ? ["--image", values.image] : []),
+      ...(publicPort ? ["--is-public", "--public-port", String(publicPort)] : []),
+      ...(values["instant-deploy"] ? ["--instant-deploy"] : []),
+    ],
+    options,
+  );
+  return {
+    created: { type: engine, name, ...pick(created, ["uuid", "status"]) },
+    help: [
+      `Run \`${BIN} db get ${name}\` for state; add --reveal to print the generated password and URLs`,
+      `Run \`${BIN} db list\` to see every database`,
+    ],
+  };
+}
+
 export const dbCommand = makeDispatcher(
   "db",
-  { list, get },
+  { list, get, create },
   {
     fallback: "list",
     summary: {
       list: "List databases with engine and health",
       get: "Show one database (secrets redacted)",
+      create: "Create a postgres or redis database (password generated, never printed)",
     },
   },
 );

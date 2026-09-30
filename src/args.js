@@ -80,12 +80,13 @@ export function positiveInt(value, name, fallback) {
 }
 
 /** Concise per-subcommand reference (AXI §10). */
-export function helpFor({ command, description, usage, flags, examples }) {
+export function helpFor({ command, description, usage, flags, notes, examples }) {
   return {
     command,
     description,
     ...(usage ? { usage } : {}),
     ...(flags && Object.keys(flags).length ? { flags } : {}),
+    ...(notes ? { notes } : {}),
     ...(examples?.length ? { examples } : {}),
   };
 }
