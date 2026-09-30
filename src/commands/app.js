@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { coolify, health, redactValue, resolveResource, summarize } from "../coolify.js";
+import { collapseRepeats, grepLines, redactLogText } from "../logs.js";
 import { BIN, helpFor, makeDispatcher, parse, positiveInt, required, wantsHelp } from "../args.js";
 
 const TYPE = "application";
@@ -35,10 +36,19 @@ const HELP = {
   }),
   logs: helpFor({
     command: "app logs",
-    description: "Recent container logs, truncated to stay inside the context budget",
-    usage: `${BIN} app logs <name|uuid> [--lines <n>] [--full]`,
-    flags: { "--lines": "Log lines to retrieve (default 100)", "--full": "Do not truncate" },
-    examples: [`${BIN} app logs digivaley`, `${BIN} app logs digivaley --lines 500 --full`],
+    description: "Recent container logs: redacted, repeats collapsed, truncated to stay inside the context budget",
+    usage: `${BIN} app logs <name|uuid> [--lines <n>] [--grep <pattern>] [--full] [--keep-repeats]`,
+    flags: {
+      "--lines": "Log lines to retrieve (default 100)",
+      "--grep": "Keep lines matching this case-insensitive regex (literal if the regex is invalid)",
+      "--full": "Do not truncate",
+      "--keep-repeats": "Do not fold repeated lines into one `[xN]` line",
+    },
+    examples: [
+      `${BIN} app logs digivaley`,
+      `${BIN} app logs digivaley --lines 1000 --grep "error|refused"`,
+      `${BIN} app logs digivaley --lines 500 --full`,
+    ],
   }),
   env: helpFor({
     command: "app env",
@@ -139,29 +149,50 @@ async function logs(argv) {
   if (wantsHelp(argv)) return HELP.logs;
   const { values, positionals } = parse(argv, {
     command: "app logs",
-    flags: { lines: { type: "string" }, full: { type: "boolean" } },
+    flags: {
+      lines: { type: "string" },
+      full: { type: "boolean" },
+      grep: { type: "string" },
+      "keep-repeats": { type: "boolean" },
+    },
   });
   const selector = required(positionals[0], "<name|uuid>", "app logs", `${BIN} app logs digivaley`);
   const lines = positiveInt(values.lines, "--lines", 100);
   const options = { context: values.context };
 
   const found = await resolveResource(selector, { ...options, type: TYPE });
-  const payload = await coolify(["app", "logs", found.uuid, "--lines", String(lines)], options);
-  const text = typeof payload === "string" ? payload : (payload?.logs ?? JSON.stringify(payload));
-
-  if (!text.trim()) {
+  // Upstream `app logs` ignores --format and always prints plain text.
+  const raw = await coolify(["app", "logs", found.uuid, "--lines", String(lines)], { ...options, json: false });
+  if (!raw.trim()) {
     return { app: found.name, logs: `0 log lines returned for ${found.name}` };
   }
+
+  const fetched = redactLogText(raw).split("\n");
+  let kept = values.grep ? grepLines(fetched, values.grep) : fetched;
+  if (kept.length === 0) {
+    return {
+      app: found.name,
+      logs: `0 of ${fetched.length} lines match ${values.grep}`,
+      help: [`Run \`${BIN} app logs ${found.name} --lines ${lines * 10} --grep "${values.grep}"\` to search further back`],
+    };
+  }
+  if (!values["keep-repeats"]) kept = collapseRepeats(kept);
+  const text = kept.join("\n");
+  const count = { lines: `${kept.length} shown of ${fetched.length} fetched` };
+
   if (values.full || text.length <= LOG_LIMIT) {
-    return { app: found.name, lines: text.split("\n").length, logs: text };
+    return { app: found.name, ...count, logs: text };
   }
   // AXI §3: never drop the field — truncate, size it, and name the escape hatch.
-  const kept = text.slice(-LOG_LIMIT);
   return {
     app: found.name,
-    logs: kept,
+    ...count,
+    logs: text.slice(-LOG_LIMIT),
     truncated: `showing last ${LOG_LIMIT} of ${text.length} chars`,
-    help: [`Run \`${BIN} app logs ${found.name} --full\` for the complete output`],
+    help: [
+      `Run \`${BIN} app logs ${found.name} --full\` for the complete output`,
+      `Run \`${BIN} app logs ${found.name} --grep <pattern>\` to filter`,
+    ],
   };
 }
 
@@ -355,7 +386,7 @@ export const appCommand = makeDispatcher(
     summary: {
       list: "List applications with their health",
       get: "Show one application by name or uuid",
-      logs: "Recent container logs, truncated by default",
+      logs: "Recent container logs: redacted, collapsed, --grep to filter",
       env: "List environment variables, or set them with --set",
       domain: "Show or change the domains an application serves",
       start: "Start an application (idempotent)",

@@ -2,6 +2,8 @@
 // Stands in for the real `coolify` binary. Responds to argv with canned JSON and
 // always emits the update banner on stderr, so the wrapper's stderr filtering
 // and JSON parsing are exercised for real rather than mocked away.
+import { CONTAINER_LOG, DEPLOYMENT, SHA } from "./deployment-log.mjs";
+
 process.stderr.write("A new version (9.9.9) is available. Update with: coolify update\n");
 
 // Key on the leading subcommand path only — stop at the first flag so flag
@@ -66,7 +68,6 @@ const TABLE = {
     build_pack: "dockerfile",
     custom_labels: "BASE64NOISE".repeat(400),
   },
-  [`app logs ${RESOURCES[0].uuid}`]: { logs: "x".repeat(9000) },
   [`app env list ${RESOURCES[0].uuid}`]: [
     { key: "NODE_ENV", value: "production", is_build_time: false },
     { key: "DATABASE_PASSWORD", value: "hunter2", is_build_time: false },
@@ -77,7 +78,24 @@ const TABLE = {
   [`app env update ${RESOURCES[0].uuid} NODE_ENV`]: { message: "updated" },
   [`app env update ${RESOURCES[0].uuid} DATABASE_PASSWORD`]: { message: "updated" },
   [`app start ${RESOURCES[1].uuid}`]: { message: "starting" },
-  [`deploy uuid ${RESOURCES[0].uuid}`]: [{ deployment_uuid: "dep1", message: "queued" }],
+  // The real CLI wraps the queued deployment in `{ deployments: [...] }`.
+  [`deploy uuid ${RESOURCES[0].uuid}`]: {
+    deployments: [{ message: "Deployment request queued.", resource_uuid: RESOURCES[0].uuid, deployment_uuid: "dep1" }],
+  },
+  // Oldest first on purpose: the wrapper must sort, not trust upstream order.
+  [`app deployments list ${RESOURCES[0].uuid}`]: [
+    {
+      deployment_uuid: "depok0",
+      status: "finished",
+      commit: SHA,
+      commit_message: "feat: a commit message long enough that the history view has to truncate it somewhere",
+      created_at: "2026-09-29T09:00:00.000000Z",
+      finished_at: "2026-09-29T09:02:05.000000Z",
+      logs: JSON.stringify([{ command: null, output: "New container is healthy.", type: "stdout", timestamp: "2026-09-29T09:02:00Z", hidden: false }]),
+    },
+    DEPLOYMENT,
+  ],
+  [`deploy get ${DEPLOYMENT.deployment_uuid}`]: DEPLOYMENT,
   "deploy list": [],
   "context list": [
     { name: "hireopz", fqdn: "https://panel.hireopz.com", default: true },
@@ -95,6 +113,30 @@ if (process.env.FAKE_COOLIFY_FAIL) {
   process.stderr.write(`Error: ${process.env.FAKE_COOLIFY_FAIL}\n`);
   process.exit(1);
 }
+// `deploy get dep1` reports in_progress for the first two polls, then finished,
+// so watch tests exercise the loop. Counting uses the call log.
+if (key === "deploy get dep1") {
+  const { readFileSync } = await import("node:fs");
+  let polls = 1;
+  try {
+    polls = readFileSync(process.env.FAKE_COOLIFY_LOG, "utf8").split("\n").filter((l) => l.includes('"dep1"')).length;
+  } catch {}
+  const status = polls <= 2 ? "in_progress" : "finished";
+  process.stdout.write(JSON.stringify({ ...DEPLOYMENT, deployment_uuid: "dep1", status, commit: SHA, logs: JSON.stringify([{ command: null, output: "New container is healthy.", type: "stdout", timestamp: "2026-09-30T10:12:00Z", hidden: false }]), finished_at: status === "finished" ? DEPLOYMENT.finished_at : null }));
+  process.exit(0);
+}
+// Upstream `app logs` ignores --format and prints plain text.
+if (key === `app logs ${RESOURCES[0].uuid}`) {
+  const unique = Array.from({ length: 300 }, (_, i) => `2026-09-30T10:02:00.000Z request ${i} served in ${i}ms`);
+  process.stdout.write(`${CONTAINER_LOG}\n${unique.join("\n")}\n`);
+  process.exit(0);
+}
+// Empty deployment history prints plain text, even with --format json.
+if (key === `app deployments list ${RESOURCES[1].uuid}`) {
+  process.stdout.write("No deployments found for this application\n");
+  process.exit(0);
+}
+
 // The real CLI answers mutations with a plain-text confirmation rather than
 // JSON, so parsing their output would fail an otherwise successful write.
 const PLAIN_TEXT = new Set([

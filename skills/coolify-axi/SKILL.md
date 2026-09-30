@@ -28,13 +28,18 @@ npx -y coolify-axi                          # dashboard: every resource and its 
 npx -y coolify-axi app list --status exited # only what is broken
 npx -y coolify-axi app get <name>
 npx -y coolify-axi app logs <name>
+npx -y coolify-axi app logs <name> --grep "error|refused"
 npx -y coolify-axi app env <name>
 npx -y coolify-axi app env <name> --set KEY=value
 npx -y coolify-axi app domain <name>
 npx -y coolify-axi app domain <name> --add https://new.example
 npx -y coolify-axi app restart <name>
 npx -y coolify-axi deploy <name>            # shorthand for `deploy run <name>`
-npx -y coolify-axi deploy list
+npx -y coolify-axi deploy <name> --wait     # trigger, poll, then summarize the result
+npx -y coolify-axi deploy list              # in-flight deployments
+npx -y coolify-axi deploy history <name>
+npx -y coolify-axi deploy logs <name>       # why the latest deployment failed
+npx -y coolify-axi deploy watch <name>
 npx -y coolify-axi db get <name>
 npx -y coolify-axi service list
 npx -y coolify-axi service env <name>
@@ -64,6 +69,9 @@ specific Coolify instance instead of the default.
 - **`service delete` is gated.** Without `--yes` it refuses, naming the service it would
   have deleted. `service env` redacts and sets like `app env`.
 - **Logs are truncated** with a size hint; pass `--full` when the tail is not enough.
+- **Logs are always redacted.** Container and deployment logs mask secret-shaped values,
+  build-arg values, and credentialed URLs; there is no `--reveal` for logs. Repeated lines
+  fold into one line with an `[xN]` count.
 - **Errors are structured** on stdout with a `help` block naming the fix, and an unknown
   flag exits 2 listing the valid flags. Correct the flag — do not drop the filter.
 

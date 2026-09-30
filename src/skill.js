@@ -42,13 +42,18 @@ npx -y ${BIN}                          # dashboard: every resource and its healt
 npx -y ${BIN} app list --status exited # only what is broken
 npx -y ${BIN} app get <name>
 npx -y ${BIN} app logs <name>
+npx -y ${BIN} app logs <name> --grep "error|refused"
 npx -y ${BIN} app env <name>
 npx -y ${BIN} app env <name> --set KEY=value
 npx -y ${BIN} app domain <name>
 npx -y ${BIN} app domain <name> --add https://new.example
 npx -y ${BIN} app restart <name>
 npx -y ${BIN} deploy <name>            # shorthand for \`deploy run <name>\`
-npx -y ${BIN} deploy list
+npx -y ${BIN} deploy <name> --wait     # trigger, poll, then summarize the result
+npx -y ${BIN} deploy list              # in-flight deployments
+npx -y ${BIN} deploy history <name>
+npx -y ${BIN} deploy logs <name>       # why the latest deployment failed
+npx -y ${BIN} deploy watch <name>
 npx -y ${BIN} db get <name>
 npx -y ${BIN} service list
 npx -y ${BIN} service env <name>
@@ -78,6 +83,9 @@ specific Coolify instance instead of the default.
 - **\`service delete\` is gated.** Without \`--yes\` it refuses, naming the service it would
   have deleted. \`service env\` redacts and sets like \`app env\`.
 - **Logs are truncated** with a size hint; pass \`--full\` when the tail is not enough.
+- **Logs are always redacted.** Container and deployment logs mask secret-shaped values,
+  build-arg values, and credentialed URLs; there is no \`--reveal\` for logs. Repeated lines
+  fold into one line with an \`[xN]\` count.
 - **Errors are structured** on stdout with a \`help\` block naming the fix, and an unknown
   flag exits 2 listing the valid flags. Correct the flag — do not drop the filter.
 

@@ -24,7 +24,7 @@ export const TOP_HELP = `${encode({
     db: "list, get",
     service: "list, get, create, delete, start, stop, restart, env",
     server: "list, get",
-    deploy: "run, list",
+    deploy: "run, list, history, logs, watch",
     context: "show configured Coolify instances",
     setup: "hooks, status, uninstall",
   },
@@ -33,7 +33,8 @@ export const TOP_HELP = `${encode({
   examples: [
     BIN,
     `${BIN} app logs digivaley`,
-    `${BIN} deploy digivaley`,
+    `${BIN} deploy digivaley --wait`,
+    `${BIN} deploy logs digivaley`,
     `${BIN} db get blogs-pg`,
     `${BIN} app list --status exited`,
   ],
