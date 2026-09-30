@@ -9,9 +9,30 @@ test, release, architecture, and sharp-edge notes that should travel with the co
 
 `coolify-axi` wraps the official [`coolify`](https://github.com/coollabsio/coolify-cli) Go
 CLI, the way `gh-axi` wraps `gh`. It shells out with `--format json`, projects the result
-down to an agent-sized schema, and renders TOON through `axi-sdk-js`. There is no direct
+down to an agent-sized schema, and renders TOON through `axi-sdk-js`. There is no general
 Coolify REST client here on purpose: the wrapped CLI already owns contexts, tokens, and
-instance selection, and reimplementing that would fork the auth story.
+instance selection, and reimplementing that would fork the auth story. The one narrow
+exception is described below.
+
+## The one REST exception (`src/api.js`)
+
+The wrapped CLI has no flag for some settings an agent must change (pre-deployment
+commands, among others), so `api(method, path, body, { context })` calls
+`/api/v1` directly. It reads the instance and token from the CLI's own
+`~/.config/coolify/config.json` (`COOLIFY_AXI_CONFIG` overrides the path for tests), so
+contexts still have one owner. The token goes into the `Authorization` header and nowhere
+else: errors carry only a redacted `message` from the body, never the raw body, and the
+token string is scrubbed from every error. Reach for it only when the CLI cannot do the job.
+
+## Logs have no field names to redact on (`src/logs.js`)
+
+`redact()`/`redactValue()` decide from a name. Log lines are free text, so
+`redactLogText()` masks by shape: secret-named `KEY=VALUE` / `KEY: VALUE`, **every**
+`--build-arg` and `ARG` value (Coolify passes all env vars that way, `DATABASE_URL`
+included), credentialed URLs anywhere in a line, bearer headers, and known token prefixes.
+Every command that prints a log line routes through it, and logs deliberately have no
+`--reveal`. When a live log shows a new leak shape, add it to `tests/fixtures/deployment-log.mjs`
+first.
 
 ## Toolchain differs from gh-axi deliberately
 
