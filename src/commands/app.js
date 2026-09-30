@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
-import { coolify, health, redactValue, resolveResource, summarize } from "../coolify.js";
+import { api } from "../api.js";
+import { coolify, health, matchOrRaise, pick, redactValue, resolvePlacement, resolveResource, scrubbed, summarize } from "../coolify.js";
 import { collapseRepeats, grepLines, redactLogText } from "../logs.js";
 import { BIN, helpFor, makeDispatcher, parse, positiveInt, required, wantsHelp } from "../args.js";
 
@@ -19,6 +20,19 @@ const DETAIL_FIELDS = [
 ];
 
 const LOG_LIMIT = 4000;
+
+/** Seams for tests: the REST fetch and the stdin reader. */
+export const io = {
+  fetchImpl: undefined,
+  stdin: async () => {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8");
+  },
+};
+
+const BUILD_PACKS = ["nixpacks", "static", "dockerfile", "dockercompose"];
+const HEALTH_PATH = /^[a-zA-Z0-9/\-_.~%,;]+$/;
 
 const HELP = {
   list: helpFor({
@@ -52,15 +66,65 @@ const HELP = {
   }),
   env: helpFor({
     command: "app env",
-    description: "List environment variables, or set them with --set (idempotent)",
-    usage: `${BIN} app env <name|uuid> [--reveal] [--set KEY=VALUE ...]`,
+    description: "List environment variables, create or update them (`env set`), or remove them (`env delete`)",
+    usage:
+      `${BIN} app env <name|uuid> [--reveal]\n` +
+      `${BIN} app env set <name|uuid> KEY=VALUE [KEY2=VALUE2 ...] [--build]\n` +
+      `${BIN} app env delete <name|uuid> KEY [KEY2 ...]`,
     flags: {
-      "--reveal": "Print secret values in clear text",
-      "--set": "KEY=VALUE to create or update, repeatable; values are never echoed back",
+      "--reveal": "Print secret values in clear text (list only)",
+      "--build": "set: also make the variable available at build time (default: runtime only)",
+      "--set": "Legacy form of `env set`: KEY=VALUE, repeatable",
     },
+    notes: "Values are never echoed back, and are masked out of any error text. A value already stored is a no-op.",
     examples: [
       `${BIN} app env digivaley`,
-      `${BIN} app env digivaley --set NEXT_PUBLIC_APP_URL=https://new.example`,
+      `${BIN} app env set digivaley NEXT_PUBLIC_APP_URL=https://new.example`,
+      `${BIN} app env set digivaley NEXT_PUBLIC_API=https://api.example --build`,
+      `${BIN} app env delete digivaley OLD_KEY`,
+    ],
+  }),
+  set: helpFor({
+    command: "app set",
+    description: "Change settings the raw CLI has no flag for: deploy hooks, health check, watch paths, auto-deploy, webhook secret (REST PATCH)",
+    usage: `${BIN} app set <name|uuid> [flags]`,
+    flags: {
+      "--pre-deploy / --clear-pre-deploy": "Pre-deployment command, or remove it",
+      "--pre-deploy-container": "Container to run the pre-deployment command in",
+      "--post-deploy / --clear-post-deploy": "Post-deployment command, or remove it",
+      "--post-deploy-container": "Container to run the post-deployment command in",
+      "--health-check on|off": "Enable or disable the health check",
+      "--health-check-path": "Health check path (letters, digits and / - _ . ~ % , ; only)",
+      "--watch-paths / --clear-watch-paths": "Glob that triggers auto-deploy, repeatable; or remove them",
+      "--auto-deploy on|off": "Deploy on push",
+      "--webhook-secret-github-stdin": "Read the GitHub webhook secret from stdin (preferred: keeps it out of argv and shell history)",
+      "--webhook-secret-github": "The secret as an argument (lands in shell history; prefer the stdin form)",
+      "--clear-webhook-secret-github": "Remove the GitHub webhook secret",
+    },
+    notes: "The webhook secret is write-only: the output says `set` or `cleared`, never the value.",
+    examples: [
+      `${BIN} app set strategist-web --pre-deploy "pnpm db:migrate" --pre-deploy-container web`,
+      `${BIN} app set strategist-web --health-check on --health-check-path /api/health`,
+      `printf %s "$SECRET" | ${BIN} app set strategist-web --webhook-secret-github-stdin`,
+    ],
+  }),
+  create: helpFor({
+    command: "app create",
+    description: "Create an application from a git repository",
+    usage:
+      `${BIN} app create <name> --repo <url|owner/repo> --branch <b> --server <name|uuid> --project <name|uuid> ` +
+      `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>] [--instant-deploy]`,
+    flags: {
+      "--repo": "A git URL (public repository), or owner/repo together with --github-app",
+      "--environment": "Environment name (default production)",
+      "--build-pack": "Default nixpacks",
+      "--port": "Exposed port (default 3000)",
+      "--github-app": "GitHub App that can read the repository (needed for owner/repo)",
+      "--instant-deploy": "Deploy right after creating",
+    },
+    examples: [
+      `${BIN} app create web --repo https://github.com/acme/web --branch main --server localhost --project blog`,
+      `${BIN} app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh --build-pack dockerfile`,
     ],
   }),
   domain: helpFor({
@@ -198,6 +262,8 @@ async function logs(argv) {
 
 async function env(argv) {
   if (wantsHelp(argv)) return HELP.env;
+  if (argv[0] === "set") return envSet(argv.slice(1));
+  if (argv[0] === "delete") return envDelete(argv.slice(1));
   const { values, positionals } = parse(argv, {
     command: "app env",
     flags: { reveal: { type: "boolean" }, set: { type: "string", multiple: true } },
@@ -214,7 +280,7 @@ async function env(argv) {
   );
   const rows = Array.isArray(vars) ? vars : [];
 
-  if (values.set?.length) return await setEnv(found, rows, values.set, options);
+  if (values.set?.length) return await setEnv(found, rows, values.set, options, false);
 
   if (rows.length === 0) {
     return { app: found.name, env: `0 environment variables set on ${found.name}` };
@@ -231,45 +297,268 @@ async function env(argv) {
   };
 }
 
+/** `app env set <app> KEY=VALUE ... [--build]`: same create-or-update path as `--set`. */
+async function envSet(argv) {
+  const { values, positionals } = parse(argv, { command: "app env set", flags: { build: { type: "boolean" } } });
+  const selector = required(positionals[0], "<name|uuid>", "app env set", `${BIN} app env set digivaley KEY=value`);
+  if (positionals.length < 2) {
+    throw new AxiError("at least one KEY=VALUE is required", "VALIDATION_ERROR", [
+      `Example: ${BIN} app env set ${selector} KEY=value`,
+    ]);
+  }
+  const options = { context: values.context };
+  return await scrubbed(positionals.slice(1).map(valueOf), async () => {
+    const found = await resolveResource(selector, { ...options, type: TYPE });
+    const vars = await coolify(["app", "env", "list", found.uuid, "--show-sensitive"], options);
+    return await setEnv(found, Array.isArray(vars) ? vars : [], positionals.slice(1), options, Boolean(values.build));
+  });
+}
+
+const valueOf = (pair) => pair.slice(pair.indexOf("=") + 1);
+
 /**
  * Create or update each KEY=VALUE. Values are compared against the current set
  * so a re-run is a no-op, and are never echoed back — several of these are
- * secrets and the output is what an agent pastes into a summary.
+ * secrets and the output is what an agent pastes into a summary. Runtime-only
+ * unless `build` is set; upstream defaults build-time to true, so it is always
+ * passed explicitly.
  */
-async function setEnv(found, rows, pairs, options) {
-  const current = new Map(rows.map((entry) => [entry.key, entry.value]));
-  const applied = [];
-
-  for (const pair of pairs) {
+async function setEnv(found, rows, pairs, options, build) {
+  const current = new Map(rows.map((entry) => [entry.key, entry]));
+  const parsed = pairs.map((pair) => {
     const at = pair.indexOf("=");
     if (at < 1) {
-      throw new AxiError(`--set ${pair} is not KEY=VALUE`, "VALIDATION_ERROR", [
-        `Example: ${BIN} app env ${found.name} --set KEY=value`,
+      throw new AxiError(`${pair.slice(0, at < 0 ? 0 : at) || "argument"} is not KEY=VALUE`, "VALIDATION_ERROR", [
+        `Example: ${BIN} app env set ${found.name} KEY=value`,
       ]);
     }
-    const key = pair.slice(0, at);
-    const value = pair.slice(at + 1);
+    return [pair.slice(0, at), pair.slice(at + 1)];
+  });
+  const secrets = parsed.map(([, value]) => value);
+  const applied = [];
 
-    if (current.has(key) && current.get(key) === value) {
+  for (const [key, value] of parsed) {
+    const existing = current.get(key);
+    if (existing && existing.value === value && Boolean(existing.is_build_time) === build) {
       applied.push({ key, unchanged: true });
       continue;
     }
-    // The listing masks secrets as `********`, so an unchanged secret cannot be
-    // detected by comparison — writing it again is the safe way round.
-    const verb = current.has(key) ? "update" : "create";
-    const args = current.has(key)
-      ? ["app", "env", "update", found.uuid, key, "--value", value]
-      : ["app", "env", "create", found.uuid, "--key", key, "--value", value];
+    // The listing masks secrets as `********` unless --show-sensitive, so an
+    // unchanged secret may not be detectable — writing it again is the safe way round.
+    const flags = [`--build-time=${build}`, "--runtime=true"];
+    const args = existing
+      ? ["app", "env", "update", found.uuid, key, "--value", value, ...flags]
+      : ["app", "env", "create", found.uuid, "--key", key, "--value", value, ...flags];
     // These writes answer with a plain-text confirmation, not JSON, and the
     // payload is unused either way — parsing it would fail a successful write.
-    await coolify(args, { ...options, json: false });
-    applied.push({ key, [verb === "update" ? "updated" : "created"]: true });
+    await scrubbed(secrets, () => coolify(args, { ...options, json: false }));
+    applied.push({ key, [existing ? "updated" : "created"]: true });
   }
 
   return {
     app: found.name,
     env: applied,
     help: [`Run \`${BIN} deploy ${found.name}\` — env changes apply on the next deployment`],
+  };
+}
+
+/** `app env delete <app> KEY ...`: upstream takes the env uuid, so resolve keys first. */
+async function envDelete(argv) {
+  const { values, positionals } = parse(argv, { command: "app env delete" });
+  const selector = required(positionals[0], "<name|uuid>", "app env delete", `${BIN} app env delete digivaley KEY`);
+  const keys = positionals.slice(1);
+  if (keys.length === 0) {
+    throw new AxiError("at least one KEY is required", "VALIDATION_ERROR", [`Example: ${BIN} app env delete ${selector} KEY`]);
+  }
+  const options = { context: values.context };
+  const found = await resolveResource(selector, { ...options, type: TYPE });
+  const vars = await coolify(["app", "env", "list", found.uuid], options);
+  const rows = Array.isArray(vars) ? vars : [];
+
+  // Resolve every key before deleting any, so a typo cannot half-apply.
+  const targets = keys.map((key) => {
+    const hit = rows.find((entry) => entry.key === key);
+    if (hit) return hit;
+    const near = rows
+      .filter((entry) => entry.key.toLowerCase().includes(key.toLowerCase()))
+      .slice(0, 5)
+      .map((entry) => `Did you mean ${entry.key}?`);
+    throw new AxiError(`no environment variable ${key} on ${found.name}`, "NOT_FOUND", [
+      ...near,
+      `Run \`${BIN} app env ${found.name}\` to list the keys`,
+    ]);
+  });
+
+  for (const target of targets) {
+    await coolify(["app", "env", "delete", found.uuid, target.uuid, "--force"], { ...options, json: false });
+  }
+  return {
+    app: found.name,
+    env: targets.map((target) => ({ key: target.key, deleted: true })),
+    help: [`Run \`${BIN} deploy ${found.name}\` — env changes apply on the next deployment`],
+  };
+}
+
+const ON_OFF = { on: true, off: false };
+
+function onOff(value, flag) {
+  if (!(value in ON_OFF)) {
+    throw new AxiError(`${flag} must be on or off`, "VALIDATION_ERROR", [`Example: ${flag} on`]);
+  }
+  return ON_OFF[value];
+}
+
+/** Settings with no raw-CLI flag: one REST PATCH of only the fields asked for. */
+async function set(argv) {
+  if (wantsHelp(argv)) return HELP.set;
+  const { values, positionals } = parse(argv, {
+    command: "app set",
+    flags: {
+      "pre-deploy": { type: "string" },
+      "clear-pre-deploy": { type: "boolean" },
+      "pre-deploy-container": { type: "string" },
+      "post-deploy": { type: "string" },
+      "clear-post-deploy": { type: "boolean" },
+      "post-deploy-container": { type: "string" },
+      "health-check": { type: "string" },
+      "health-check-path": { type: "string" },
+      "watch-paths": { type: "string", multiple: true },
+      "clear-watch-paths": { type: "boolean" },
+      "auto-deploy": { type: "string" },
+      "webhook-secret-github": { type: "string" },
+      "webhook-secret-github-stdin": { type: "boolean" },
+      "clear-webhook-secret-github": { type: "boolean" },
+    },
+  });
+  const selector = required(positionals[0], "<name|uuid>", "app set", `${BIN} app set digivaley --health-check on`);
+  const clash = (a, b) => {
+    throw new AxiError(`pass ${a} or ${b}, not both`, "VALIDATION_ERROR", [`Use one of them`]);
+  };
+  const body = {};
+  const shown = {};
+  const put = (field, value, display = value) => {
+    body[field] = value;
+    shown[field] = display === null ? "cleared" : typeof display === "string" ? redactLogText(display) : display;
+  };
+  for (const [flag, clear, field] of [
+    ["pre-deploy", "clear-pre-deploy", "pre_deployment_command"],
+    ["post-deploy", "clear-post-deploy", "post_deployment_command"],
+  ]) {
+    if (values[flag] !== undefined && values[clear]) clash(`--${flag}`, `--${clear}`);
+    if (values[flag] === "") throw new AxiError(`--${flag} needs a command`, "VALIDATION_ERROR", [`Use --${clear} to remove it`]);
+    if (values[flag] !== undefined) put(field, values[flag]);
+    if (values[clear]) put(field, null);
+  }
+  if (values["pre-deploy-container"] !== undefined) put("pre_deployment_command_container", values["pre-deploy-container"]);
+  if (values["post-deploy-container"] !== undefined) put("post_deployment_command_container", values["post-deploy-container"]);
+  if (values["health-check"] !== undefined) put("health_check_enabled", onOff(values["health-check"], "--health-check"));
+  if (values["health-check-path"] !== undefined) {
+    if (!HEALTH_PATH.test(values["health-check-path"])) {
+      throw new AxiError("--health-check-path has characters Coolify rejects", "VALIDATION_ERROR", [
+        "Allowed: letters, digits and / - _ . ~ % , ;",
+        `Example: ${BIN} app set ${selector} --health-check-path /api/health`,
+      ]);
+    }
+    put("health_check_path", values["health-check-path"]);
+  }
+  if (values["watch-paths"]?.length && values["clear-watch-paths"]) clash("--watch-paths", "--clear-watch-paths");
+  if (values["watch-paths"]?.length) {
+    put("watch_paths", values["watch-paths"].flatMap((v) => v.split("\n")).filter(Boolean).join("\n"));
+  }
+  if (values["clear-watch-paths"]) put("watch_paths", null);
+  if (values["auto-deploy"] !== undefined) put("is_auto_deploy_enabled", onOff(values["auto-deploy"], "--auto-deploy"));
+
+  const webhookModes = ["webhook-secret-github", "webhook-secret-github-stdin", "clear-webhook-secret-github"].filter((f) => values[f] !== undefined && values[f] !== false);
+  if (webhookModes.length > 1) clash(`--${webhookModes[0]}`, `--${webhookModes[1]}`);
+  let secret;
+  if (values["webhook-secret-github-stdin"]) secret = (await io.stdin()).replace(/\r?\n$/, "");
+  else if (values["webhook-secret-github"] !== undefined) secret = values["webhook-secret-github"];
+  if (secret !== undefined) {
+    if (!secret) throw new AxiError("the webhook secret is empty", "VALIDATION_ERROR", ["Use --clear-webhook-secret-github to remove it"]);
+    put("manual_webhook_secret_github", secret, "set");
+  }
+  if (values["clear-webhook-secret-github"]) put("manual_webhook_secret_github", null);
+
+  if (Object.keys(body).length === 0) {
+    throw new AxiError("no setting given", "VALIDATION_ERROR", [
+      `Example: ${BIN} app set ${selector} --health-check on --health-check-path /api/health`,
+      `Run \`${BIN} app set --help\` for every flag`,
+    ]);
+  }
+
+  const options = { context: values.context };
+  const found = await resolveResource(selector, { ...options, type: TYPE });
+  // The response is discarded on purpose: it can echo the webhook secret.
+  await scrubbed([secret], () => api("PATCH", `/applications/${found.uuid}`, body, { ...options, fetchImpl: io.fetchImpl }));
+  return {
+    app: found.name,
+    changed: shown,
+    help: [`Run \`${BIN} deploy ${found.name}\` to apply the change to a running deployment`],
+  };
+}
+
+/** `app create`: git repo -> application. Names resolve to uuids; nothing secret is returned. */
+async function create(argv) {
+  if (wantsHelp(argv)) return HELP.create;
+  const { values, positionals } = parse(argv, {
+    command: "app create",
+    flags: {
+      repo: { type: "string" },
+      branch: { type: "string" },
+      server: { type: "string" },
+      project: { type: "string" },
+      environment: { type: "string" },
+      "build-pack": { type: "string" },
+      "dockerfile-target": { type: "string" },
+      port: { type: "string" },
+      domain: { type: "string" },
+      "github-app": { type: "string" },
+      "instant-deploy": { type: "boolean" },
+    },
+  });
+  const example = `${BIN} app create web --repo https://github.com/acme/web --branch main --server localhost --project blog`;
+  const name = required(positionals[0], "<name>", "app create", example);
+  for (const flag of ["repo", "branch", "server", "project"]) required(values[flag], `--${flag}`, "app create", example);
+  const buildPack = values["build-pack"] ?? "nixpacks";
+  if (!BUILD_PACKS.includes(buildPack)) {
+    throw new AxiError(`--build-pack ${buildPack} is not supported`, "VALIDATION_ERROR", [`valid build packs: ${BUILD_PACKS.join(", ")}`]);
+  }
+  const port = positiveInt(values.port, "--port", 3000);
+  const isUrl = /^([a-z][a-z0-9+.-]*:\/\/|git@)/i.test(values.repo);
+  if (!isUrl && !values["github-app"]) {
+    throw new AxiError(`--repo ${values.repo} is not a URL, so a GitHub App is needed to read it`, "VALIDATION_ERROR", [
+      "Pass --github-app <name|uuid>, or give the full git URL for a public repository",
+    ]);
+  }
+  if (isUrl && values["github-app"]) {
+    throw new AxiError("--github-app needs --repo as owner/repo, not a URL", "VALIDATION_ERROR", [`Example: --repo acme/web --github-app <name>`]);
+  }
+
+  const options = { context: values.context };
+  const placement = await resolvePlacement(values, options);
+  const source = [];
+  if (values["github-app"]) {
+    const gh = matchOrRaise(await coolify(["github", "list"], options), values["github-app"], "github app");
+    source.push("github", "--github-app-uuid", gh.uuid);
+  } else {
+    source.push("public");
+  }
+  const args = [
+    "app", "create", source[0], ...source.slice(1), ...placement,
+    "--name", name, "--git-repository", values.repo, "--git-branch", values.branch,
+    "--build-pack", buildPack, "--ports-exposes", String(port),
+    ...(values.domain ? ["--domains", values.domain] : []),
+    ...(values["dockerfile-target"] ? ["--dockerfile-target-build", values["dockerfile-target"]] : []),
+    ...(values["instant-deploy"] ? ["--instant-deploy"] : []),
+  ];
+  const created = await coolify(args, options);
+  return {
+    created: { type: "application", name, ...pick(created, ["uuid", "domains"]) },
+    help: [
+      `Run \`${BIN} app get ${name}\` for the repo, branch, and build pack`,
+      ...(values["instant-deploy"] ? [`Run \`${BIN} deploy watch ${name}\` to follow the first deployment`] : [`Run \`${BIN} deploy ${name}\` to deploy it`]),
+      `Run \`${BIN} app env set ${name} KEY=value\` to add environment variables first`,
+    ],
   };
 }
 
@@ -376,6 +665,8 @@ export const appCommand = makeDispatcher(
     get,
     logs,
     env,
+    set,
+    create,
     domain,
     start: stateChanger("start", "running"),
     stop: stateChanger("stop", "exited"),
@@ -387,7 +678,9 @@ export const appCommand = makeDispatcher(
       list: "List applications with their health",
       get: "Show one application by name or uuid",
       logs: "Recent container logs: redacted, collapsed, --grep to filter",
-      env: "List environment variables, or set them with --set",
+      env: "List environment variables; `env set KEY=VALUE` / `env delete KEY` to change them",
+      set: "Change deploy hooks, health check, watch paths, auto-deploy, webhook secret",
+      create: "Create an application from a git repository",
       domain: "Show or change the domains an application serves",
       start: "Start an application (idempotent)",
       stop: "Stop an application (idempotent)",

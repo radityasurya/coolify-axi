@@ -199,3 +199,39 @@ export async function resolveResource(selector, options = {}) {
     "Run `coolify-axi` to list every resource",
   ]);
 }
+
+/**
+ * Rebuild an error with every secret string masked out of its message and help.
+ * Failed CLI runs echo their argv (`while running coolify ... --value <secret>`),
+ * so a write that carries a secret must scrub before the error is surfaced.
+ */
+export function scrubError(error, secrets) {
+  if (!(error instanceof AxiError)) return error;
+  const wipe = (text) =>
+    secrets.filter(Boolean).reduce((out, secret) => out.replaceAll(secret, "<redacted>"), String(text));
+  return new AxiError(wipe(error.message), error.code, (error.suggestions ?? []).map(wipe));
+}
+
+export async function scrubbed(secrets, run) {
+  try {
+    return await run();
+  } catch (error) {
+    throw scrubError(error, secrets);
+  }
+}
+
+/**
+ * Names -> uuids for `create` commands. Environment defaults to `production`,
+ * which every Coolify project has. Returns the flags the wrapped CLI expects.
+ */
+export async function resolvePlacement(values, options) {
+  const server = matchOrRaise(await coolify(["server", "list"], options), values.server, "server");
+  const project = matchOrRaise(await coolify(["project", "list"], options), values.project, "project");
+  return ["--server-uuid", server.uuid, "--project-uuid", project.uuid, "--environment-name", values.environment ?? "production"];
+}
+
+/** Keep only the named fields, so a new upstream secret field is excluded by default. */
+export function pick(record, fields) {
+  const source = record && typeof record === "object" && !Array.isArray(record) ? record : {};
+  return Object.fromEntries(fields.filter((f) => source[f] !== undefined && source[f] !== "" && source[f] !== null).map((f) => [f, source[f]]));
+}
