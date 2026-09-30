@@ -66,9 +66,18 @@ test("deploy logs summarizes the latest deployment's failure without leaking sec
 
 test("deploy logs --full --debug prints the whole redacted log, repeats collapsed", async () => {
   const output = await deployCommand(["logs", "digivaley", "depfail1", "--full", "--debug"]);
-  assert.match(output.log, /--build-arg DATABASE_URL=<redacted>/);
-  assert.match(output.log, /\$ docker exec app-1 sh -c 'pnpm db:migrate'/);
+  assert.ok(Array.isArray(output.log));
+  assert.equal(output.lines, output.log.length);
+  assert.match(output.log.join("\n"), /--build-arg DATABASE_URL=<redacted>/);
+  assert.match(output.log.join("\n"), /\$ docker exec app-1 sh -c 'pnpm db:migrate'/);
   assertNoSecrets(output);
+});
+
+test("deploy run --help names the deployment uuid and how to follow it", async () => {
+  const help = JSON.stringify(await deployCommand(["run", "--help"]));
+  assert.match(help, /deployment uuid/);
+  assert.match(help, /deploy watch <app> <uuid>/);
+  assert.match(help, /--wait/);
 });
 
 test("deploy logs refuses a deployment uuid that belongs to another app", async () => {

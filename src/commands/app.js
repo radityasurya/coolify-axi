@@ -245,16 +245,20 @@ async function logs(argv) {
   }
   if (!values["keep-repeats"]) kept = collapseRepeats(kept);
   const text = kept.join("\n");
+  const hints = [
+    `Run \`${BIN} app logs ${found.name} --grep <pattern>\` to filter, \`--lines <n>\` to look further back`,
+  ];
   const count = { lines: `${kept.length} shown of ${fetched.length} fetched` };
 
-  if (values.full || text.length <= LOG_LIMIT) {
-    return { app: found.name, ...count, logs: text };
+  if (values.full) return { app: found.name, ...count, logs: kept };
+  if (text.length <= LOG_LIMIT) {
+    return { app: found.name, ...count, logs: kept, help: [...hints, `Run \`${BIN} app logs ${found.name} --full\` to skip truncation`] };
   }
   // AXI §3: never drop the field — truncate, size it, and name the escape hatch.
   return {
     app: found.name,
     ...count,
-    logs: text.slice(-LOG_LIMIT),
+    logs: text.slice(-LOG_LIMIT).split("\n"),
     truncated: `showing last ${LOG_LIMIT} of ${text.length} chars`,
     help: [
       `Run \`${BIN} app logs ${found.name} --full\` for the complete output`,
@@ -470,10 +474,14 @@ async function set(argv) {
   if (values["health-check"] !== undefined) put("health_check_enabled", onOff(values["health-check"], "--health-check"));
   if (values["health-check-path"] !== undefined) {
     if (!HEALTH_PATH.test(values["health-check-path"])) {
-      throw new AxiError("--health-check-path has characters Coolify rejects", "VALIDATION_ERROR", [
-        "Allowed: letters, digits and / - _ . ~ % , ;",
-        `Example: ${BIN} app set ${selector} --health-check-path /api/health`,
-      ]);
+      throw new AxiError(
+        values["health-check-path"] === "" ? "--health-check-path must not be empty" : "--health-check-path has characters Coolify rejects",
+        "VALIDATION_ERROR",
+        [
+          "Allowed: letters, digits and / - _ . ~ % , ;",
+          `Example: ${BIN} app set ${selector} --health-check-path /api/health`,
+        ],
+      );
     }
     put("health_check_path", values["health-check-path"]);
   }

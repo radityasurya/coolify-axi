@@ -48,15 +48,18 @@ test("logs read plain text, collapse the flood, redact, and truncate with a size
 test("--full returns the whole redacted log with repeats collapsed", async () => {
   const output = await appCommand(["logs", "digivaley", "--full"]);
   assert.ok(!("truncated" in output));
-  assert.match(output.logs, /ECONNREFUSED 10\.0\.1\.5:6379 \[x40\]/);
-  assert.match(output.logs, /postgres:\/\/u:<redacted>@db\/x/);
-  assert.doesNotMatch(output.logs, /hunter2|eyJhbGci/);
+  assert.ok(Array.isArray(output.logs), "one array entry per line so agents can grep");
+  assert.ok(output.logs.every((line) => !line.includes("\n")));
+  assert.match(output.logs.join("\n"), /ECONNREFUSED 10\.0\.1\.5:6379 \[x40\]/);
+  assert.match(output.logs.join("\n"), /postgres:\/\/u:<redacted>@db\/x/);
+  assert.doesNotMatch(output.logs.join("\n"), /hunter2|eyJhbGci/);
 });
 
 test("--grep filters case-insensitively before collapsing", async () => {
   const output = await appCommand(["logs", "digivaley", "--grep", "econnrefused|listening"]);
   assert.equal(output.lines, "2 shown of 344 fetched");
-  assert.match(output.logs, /\[x40\]/);
+  assert.match(output.logs.join("\n"), /\[x40\]/);
+  assert.ok(output.help.some((line) => line.includes("--lines")), "short output still carries a hint");
 });
 
 test("--grep with no match says so definitively", async () => {

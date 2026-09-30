@@ -96,7 +96,7 @@ for (const [name, argv, pattern] of [
   ["no setting", ["set", "digivaley"], /no setting/],
   ["set and clear", ["set", "digivaley", "--pre-deploy", "x", "--clear-pre-deploy"], /not both/],
   ["bad health path", ["set", "digivaley", "--health-check-path", "/a b"], /health-check-path/],
-  ["empty health path", ["set", "digivaley", "--health-check-path", ""], /health-check-path/],
+  ["empty health path", ["set", "digivaley", "--health-check-path", ""], /health-check-path must not be empty/],
   ["bad on/off", ["set", "digivaley", "--auto-deploy", "yes"], /on or off/],
   ["two webhook modes", ["set", "digivaley", "--webhook-secret-github", "x", "--clear-webhook-secret-github"], /not both/],
   ["empty pre-deploy", ["set", "digivaley", "--pre-deploy", ""], /needs a command/],

@@ -19,15 +19,16 @@ const WAIT_HELP = {
 const HELP = {
   run: helpFor({
     command: "deploy run",
-    description: "Trigger a deployment for an application or service, by name or uuid",
-    usage: `${BIN} deploy run <name|uuid> [--force] [--docker-tag <tag>] [--wait]`,
+    description:
+      "Trigger a deployment for an application or service, by name or uuid. The result includes the new deployment uuid; follow it with `deploy watch <app> <uuid>` or pass --wait. `deploy <name>` is shorthand for `deploy run <name>`",
+    usage: `${BIN} deploy [run] <name|uuid> [--force] [--docker-tag <tag>] [--wait]`,
     flags: {
       "--force": "Rebuild without using the layer cache",
       "--docker-tag": "Override the image tag for this deployment",
-      "--wait": "Poll until the deployment finishes, then print its summary",
+      "--wait": "Poll until the deployment finishes, then print its summary (same as `deploy watch <app> <uuid>`)",
       ...WAIT_HELP,
     },
-    examples: [`${BIN} deploy run digivaley`, `${BIN} deploy digivaley --wait`],
+    examples: [`${BIN} deploy run digivaley`, `${BIN} deploy digivaley --wait`, `${BIN} deploy watch digivaley <deployment-uuid>`],
   }),
   list: helpFor({
     command: "deploy list",
@@ -216,7 +217,7 @@ async function logs(argv) {
     deployment: uuid,
     status: deployment.status,
     lines: lines.length,
-    log: lines.join("\n"),
+    log: lines,
     ...(values.debug ? {} : { help: [`Run with --debug to include Coolify's hidden debug entries`] }),
   };
 }
