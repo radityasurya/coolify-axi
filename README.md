@@ -93,18 +93,29 @@ coolify-axi app list --status exited    # only what is broken
 coolify-axi app get digivaley           # domain, repo, branch, build pack
 coolify-axi app logs digivaley          # recent container logs, truncated
 coolify-axi app logs digivaley --lines 500 --full
+coolify-axi app logs digivaley --lines 1000 --grep "error|refused"  # repeats fold into [xN]; --keep-repeats to disable
 coolify-axi app env digivaley           # env vars, values redacted
 coolify-axi app env digivaley --reveal  # env vars in clear text
+coolify-axi app env set digivaley KEY=VALUE            # runtime-only; add --build for build time
+coolify-axi app env delete digivaley OLD_KEY
+coolify-axi app set digivaley --pre-deploy "pnpm db:migrate" --health-check on --auto-deploy on
+printf %s "$SECRET" | coolify-axi app set digivaley --webhook-secret-github-stdin
+coolify-axi app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh
 coolify-axi app restart digivaley
 coolify-axi app stop karja-nl
 
-coolify-axi deploy digivaley            # shorthand for `deploy run digivaley`
+coolify-axi deploy digivaley            # shorthand for `deploy run digivaley`; prints the deployment uuid
+coolify-axi deploy digivaley --wait     # follow it, then print a summary
 coolify-axi deploy digivaley --force    # rebuild without the layer cache
 coolify-axi deploy list                 # in-flight and recent deployments
+coolify-axi deploy history digivaley    # past deployments, newest first
+coolify-axi deploy logs digivaley       # why the latest one failed; --full for the log, --debug for hidden entries
+coolify-axi deploy watch digivaley      # poll until it ends (--timeout 300 s by default)
 
 coolify-axi db list
 coolify-axi db get blogs-pg             # connection details, secrets redacted
 coolify-axi db get blogs-pg --reveal
+coolify-axi db create postgres blogs-pg --server localhost --project blog   # password never printed
 
 coolify-axi service list
 coolify-axi service env cAdvisor            # secrets redacted; --set KEY=VALUE to change
@@ -121,11 +132,11 @@ coolify-axi update --check              # is a newer release available?
 | Command | Subcommands | Purpose |
 | --- | --- | --- |
 | *(none)* | — | Dashboard: every resource, its type, and its state |
-| `app` | `list`, `get`, `logs`, `env`, `start`, `stop`, `restart` | Applications |
-| `db` | `list`, `get` | Databases, with redacted connection details |
+| `app` | `list`, `get`, `logs`, `env`, `set`, `create`, `start`, `stop`, `restart` | Applications; `env set`/`env delete` change variables, `set` changes deploy settings |
+| `db` | `list`, `get`, `create` | Databases, with redacted connection details; `create` takes `postgres` or `redis` |
 | `service` | `list`, `get`, `create`, `delete`, `start`, `stop`, `restart`, `env` | One-click services; delete is `--yes`-gated |
 | `server` | `list`, `get` | Connected servers |
-| `deploy` | `run`, `list` | Trigger and watch deployments |
+| `deploy` | `run`, `list`, `history`, `logs`, `watch` | Trigger, follow, and diagnose deployments |
 | `context` | — | Which Coolify instance commands target |
 | `setup` | `hooks`, `status`, `uninstall` | Agent session integration |
 
@@ -151,6 +162,13 @@ Like the AXI SDK's other tools, flags must come **after** the command
   secret-shaped values, and scrub passwords embedded in connection URLs such as
   `postgres://user:pw@host/db`. `--reveal` opts in, and threads `--show-sensitive` through to
   the wrapped CLI.
+- **Logs are always redacted.** `app logs` and `deploy logs` mask secrets by shape (build-arg
+  values, secret-named `KEY=VALUE`, credentialed URLs, bearer headers, private keys) and have no
+  `--reveal`. Errors from the wrapped CLI are redacted too. `env set` never echoes values, and the
+  GitHub webhook secret in `app set` is write-only: output says `set` or `cleared`.
+- **One REST exception.** `app set` changes settings the `coolify` CLI has no flags for
+  (deploy hooks, health check, watch paths, auto-deploy, webhook secret) with a Coolify API
+  `PATCH`. It reads the instance and token from the CLI's own config and never prints the token.
 - **Idempotent state changes.** `app start`/`stop` and `service start`/`stop` exit 0 as a
   no-op when the resource is already in the target state, so agents declare intent instead of
   reading first.
