@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.4](https://github.com/radityasurya/coolify-axi/compare/v0.1.3...v0.1.4) (2026-09-30)
+
+
+### Features
+
+* add app set, env set/delete, app create, and db create ([8a58970](https://github.com/radityasurya/coolify-axi/commit/8a589707ed7603d189a2b7457b147986c9b0c84b))
+* add REST client and log redaction, collapse, and summary helpers ([9284e07](https://github.com/radityasurya/coolify-axi/commit/9284e072214d089a15c0bbcba2c8707a7230e3c7))
+* close raw CLI gaps with redacted diagnostics and write commands ([8d97f61](https://github.com/radityasurya/coolify-axi/commit/8d97f6158c854576c55d3d4ceb70b9b46ca92c9e))
+* **deploy:** add history, logs, watch, and run --wait; fix app logs ([312cdbb](https://github.com/radityasurya/coolify-axi/commit/312cdbbe4e99aff7fa197588510c7bd8ab433e0e))
+
+
+### Bug Fixes
+
+* agent-experience polish for deploy help, health path error, log arrays, app logs hint ([2ad760a](https://github.com/radityasurya/coolify-axi/commit/2ad760acc3f042c81511013f26fde562bee355b3))
+* close secret leak paths found in final-gate review ([b508cb5](https://github.com/radityasurya/coolify-axi/commit/b508cb55a0494e8b12b6e3f6de87b279e53fd522))
+
 ## [0.1.3](https://github.com/radityasurya/coolify-axi/compare/v0.1.2...v0.1.3) (2026-09-22)
 
 
