@@ -1,6 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { api } from "../api.js";
-import { coolify, health, matchOrRaise, pick, redactValue, resolvePlacement, resolveResource, scrubbed, summarize } from "../coolify.js";
+import { coolify, health, matchOrRaise, maskEnvValue, pick, resolvePlacement, resolveResource, scrubbed, summarize } from "../coolify.js";
 import { collapseRepeats, grepLines, redactLogText } from "../logs.js";
 import { BIN, helpFor, makeDispatcher, parse, positiveInt, required, wantsHelp } from "../args.js";
 
@@ -72,7 +72,7 @@ const HELP = {
       `${BIN} app env set <name|uuid> KEY=VALUE [KEY2=VALUE2 ...] [--build]\n` +
       `${BIN} app env delete <name|uuid> KEY [KEY2 ...]`,
     flags: {
-      "--reveal": "Print secret values in clear text (list only)",
+      "--reveal": "Print every value in clear text (list only); without it only shared-variable references such as {{team.X}} show",
       "--build": "set: make the variable available at build time too. Without it, a new variable is runtime-only and an existing one keeps its build-time setting",
       "--set": "Legacy form: KEY=VALUE, repeatable. Uses upstream defaults: a new variable is build-time AND runtime",
     },
@@ -289,12 +289,9 @@ async function env(argv) {
   }
 
   const found = await resolveResource(selector, { ...options, type: TYPE });
-  // The wrapped CLI masks values as `********` unless asked; --reveal has to
-  // reach it, or it returns asterisks instead of the value.
-  const vars = await coolify(
-    ["app", "env", "list", found.uuid, ...(values.reveal ? ["--show-sensitive"] : [])],
-    options,
-  );
+  // Fetched in clear even without --reveal: the wrapped CLI would turn a
+  // shared-variable reference into `********`. maskEnvValue masks the rest.
+  const vars = await coolify(["app", "env", "list", found.uuid, "--show-sensitive"], options);
   const rows = Array.isArray(vars) ? vars : [];
 
   if (rows.length === 0) {
@@ -305,10 +302,10 @@ async function env(argv) {
     count: `${rows.length} total`,
     env: rows.map((entry) => ({
       key: entry.key,
-      value: redactValue(entry.key, entry.value, values.reveal),
+      value: maskEnvValue(entry.value, values.reveal),
       build_time: Boolean(entry.is_build_time),
     })),
-    ...(values.reveal ? {} : { note: "values redacted; pass --reveal to print them" }),
+    ...(values.reveal ? {} : { note: "values redacted except shared-variable references; pass --reveal to print them" }),
   };
 }
 
@@ -673,7 +670,8 @@ function stateChanger(action, desired) {
     if (desired && state === desired) {
       return { app: found.name, state, unchanged: true, note: `already ${desired} (no-op)` };
     }
-    await coolify(["app", action, found.uuid], options);
+    // The wrapped CLI answers with a plain-text message, not JSON.
+    await coolify(["app", action, found.uuid], { ...options, json: false });
     return {
       app: found.name,
       action,

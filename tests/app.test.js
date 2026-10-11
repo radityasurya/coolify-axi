@@ -72,12 +72,13 @@ test("--keep-repeats leaves the flood uncollapsed", async () => {
   assert.equal(output.lines, "40 shown of 344 fetched");
 });
 
-test("env redacts secret-shaped values by default", async () => {
+test("env masks every value except a shared-variable reference", async () => {
   const output = await appCommand(["env", "digivaley"]);
   const secret = output.env.find((row) => row.key === "DATABASE_PASSWORD");
   assert.match(secret.value, /redacted/, "the VALUE is the secret, not the variable name");
   assert.equal(secret.key, "DATABASE_PASSWORD", "the variable name must stay readable");
-  assert.equal(output.env.find((row) => row.key === "NODE_ENV").value, "production");
+  assert.match(output.env.find((row) => row.key === "NODE_ENV").value, /redacted/);
+  assert.equal(output.env.find((row) => row.key === "SHARED_DSN").value, "{{ environment.SENTRY_DSN }}");
 });
 
 test("env --reveal prints the real value", async () => {

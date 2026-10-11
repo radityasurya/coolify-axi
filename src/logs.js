@@ -14,6 +14,18 @@ const SHELL_QUOTED = String.raw`'\\''(?:(?!'\\'')[^\n])*'\\''`;
 const QUOTED_OR_BARE = String.raw`(?:${SHELL_QUOTED}|"[^"]*"|'[^']*'|[^\s"',;&]+)`;
 const NOT_MASKED = String.raw`(?!${MASK})`;
 
+// PEM private keys span lines; an unterminated block is masked to the end of the text.
+const PEM = [/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g, `$1${MASK}$2`];
+
+// Token shapes that are secrets regardless of what precedes them.
+const TOKEN_SHAPES = [
+  [/\b(?:[sr]k|pk)_(?:live|test)_[A-Za-z0-9]{8,}/g, MASK],
+  [/\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_\w{20,}|\bxox[abprs]-[\w-]{10,}/g, MASK],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, MASK],
+  [/\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, MASK],
+  [/\b(Bearer|Basic)\s+(?!<)[A-Za-z0-9._~+/=-]{8,}/g, `$1 ${MASK}`],
+];
+
 const RULES = [
   // Build args carry secrets under innocent names (DATABASE_URL), so every value goes.
   [
@@ -26,18 +38,12 @@ const RULES = [
     new RegExp(String.raw`((?:^|\s)(?:-e|--env)[ =]+(?:'\\''|["'])?)([A-Za-z_]\w*)=(${SHELL_QUOTED}|"[^"]*"|'[^']*'|[^\s"']*)`, "g"),
     `$1$2=${MASK}`,
   ],
-  // PEM private keys span lines; an unterminated block is masked to the end of the text.
-  [/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g, `$1${MASK}$2`],
+  PEM,
   // Credentialed URLs anywhere in a line (URL_CREDENTIALS without the ^ anchor; user may be empty).
   [/([a-z][a-z0-9+.-]*:\/\/[^:/@\s]*:)([^@\s]+)(@)/gi, `$1${MASK}$3`],
   // User-only userinfo is a credential too (Sentry DSNs, token-as-user git URLs).
   [/([a-z][a-z0-9+.-]*:\/\/)(?!<redacted>)([^:/@\s]+)(@)/gi, `$1${MASK}$3`],
-  // Token shapes that are secrets regardless of what precedes them.
-  [/\b(?:[sr]k|pk)_(?:live|test)_[A-Za-z0-9]{8,}/g, MASK],
-  [/\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_\w{20,}|\bxox[abprs]-[\w-]{10,}/g, MASK],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, MASK],
-  [/\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, MASK],
-  [/\b(Bearer|Basic)\s+(?!<)[A-Za-z0-9._~+/=-]{8,}/g, `$1 ${MASK}`],
+  ...TOKEN_SHAPES,
   // KEY=VALUE, KEY: VALUE, "key": "value" — including `Authorization: Bearer x`.
   [
     new RegExp(String.raw`\b(${NAME})(["']?[ \t]*[=:][ \t]*)${NOT_MASKED}(?:(?:Bearer|Basic|Token)\s+)?${QUOTED_OR_BARE}`, "gi"),
@@ -57,6 +63,67 @@ export function redactLogText(text) {
   let out = String(text);
   for (const [pattern, replacement] of RULES) out = out.replace(pattern, replacement);
   return out;
+}
+
+/** A Coolify shared-variable reference names a value; it is not one. */
+export const SHARED_REF = /^\{\{\s*(team|project|environment)\.[A-Za-z0-9_]+\s*\}\}$/;
+// `${VAR}` / `$VAR` interpolations, alone or concatenated, are references too.
+const INTERPOLATION = /^(?:\$\{\w+\}|\$\w+)+$/;
+// PAT only as a word (GH_PAT), so PATH and DATA_PATH stay readable for a clone.
+const COMPOSE_SECRET = /token|secret|key|pass|credential|(?:^|[^a-z])pat(?:[^a-z]|$)/i;
+const COMPOSE_SHAPES = [
+  PEM,
+  // Credentialed URLs, unless the password is itself a `${VAR}` reference.
+  [/([a-z][a-z0-9+.-]*:\/\/[^:/@\s]*:)(?!\$\{\w+\}@)([^@\s]+)(@)/gi, `$1${MASK}$3`],
+  [/([a-z][a-z0-9+.-]*:\/\/)(?!<redacted>|\$\{\w+\}@)([^:/@\s]+)(@)/gi, `$1${MASK}$3`],
+  ...TOKEN_SHAPES,
+];
+
+/** Mask one compose value, keeping its quotes and any reference it is made of. */
+function maskComposeValue(raw) {
+  const quote = raw.length > 1 && /^["']/.test(raw) && raw.endsWith(raw[0]) ? raw[0] : "";
+  const inner = (quote ? raw.slice(1, -1) : raw).trim();
+  if (!inner || INTERPOLATION.test(inner) || SHARED_REF.test(inner)) return raw;
+  // `${VAR:-default}`: the name is a reference, the default may be a literal secret.
+  const fallback = inner.match(/^\$\{(\w+)(:?[-=?+])(.*)\}$/);
+  return `${quote}${fallback ? `\${${fallback[1]}${fallback[2]}${MASK}}` : MASK}${quote}`;
+}
+
+/**
+ * Compose source, redacted for printing. Secret-named keys are masked in map
+ * (`KEY: v`) and list (`- KEY=v`) form, including YAML block scalars; token and
+ * credential shapes are masked anywhere. `${VAR}` and `{{team.X}}` stay visible.
+ * ponytail: line-based, not a YAML parser; flow-style maps (`{ KEY: v }`) only
+ * get the shape rules.
+ */
+export function redactCompose(text) {
+  if (!text) return text ?? "";
+  let block = -1; // indent of a secret key whose value is a block scalar (`KEY: |`)
+  const lines = String(text)
+    .split("\n")
+    .map((line) => {
+      const indent = line.search(/\S/);
+      if (block >= 0) {
+        if (indent < 0) return line;
+        if (indent > block) return `${line.slice(0, indent)}${MASK}`;
+        block = -1;
+      }
+      const list = line.match(/^(\s*-\s+)(["']?)([\w.-]+)=(.*?)\2\s*$/);
+      if (list && COMPOSE_SECRET.test(list[3])) {
+        return `${list[1]}${list[2]}${list[3]}=${maskComposeValue(list[4])}${list[2]}`;
+      }
+      const map = line.match(/^(\s*(?:-\s+)?)(["']?)([\w.-]+)\2(:[ \t]+)(.+?)\s*$/);
+      if (map && COMPOSE_SECRET.test(map[3])) {
+        if (/^[|>][-+0-9]*$/.test(map[5])) {
+          block = indent;
+          return line;
+        }
+        return `${map[1]}${map[2]}${map[3]}${map[2]}${map[4]}${maskComposeValue(map[5])}`;
+      }
+      return line;
+    })
+    .join("\n");
+  return COMPOSE_SHAPES.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), lines);
 }
 
 const TIMESTAMP = /\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?Z?|\b\d\d:\d\d:\d\d(?:\.\d+)?\b/g;

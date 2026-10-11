@@ -118,13 +118,35 @@ coolify-axi db get blogs-pg --reveal
 coolify-axi db create postgres blogs-pg --server localhost --project blog   # password never printed
 
 coolify-axi service list
-coolify-axi service env cAdvisor            # secrets redacted; --set KEY=VALUE to change
+coolify-axi service get cAdvisor            # project, environment, server and destination uuids, env keys
+coolify-axi service compose cAdvisor        # Docker Compose source, secrets redacted
+coolify-axi service env cAdvisor            # values redacted except {{team.X}} references
+coolify-axi service env cAdvisor --set 'ACCESS_TOKEN={{team.GH_RUNNER_TOKEN}}'
 coolify-axi service restart cAdvisor
 coolify-axi service create --list-types     # every valid one-click type
+coolify-axi service create n8n --project-uuid <uuid> --server-uuid <uuid>
+coolify-axi service create --docker-compose-file compose.yml --name runner-2 \
+  --project-uuid <uuid> --environment-uuid <uuid> --server-uuid <uuid> --destination-uuid <uuid>
 coolify-axi service delete cAdvisor --yes   # refuses without --yes
+coolify-axi project list
+coolify-axi project get blog                # environments with id, name, uuid
+coolify-axi shared-env                      # team shared variable keys, never values
+coolify-axi shared-env --project blog --environment production
 coolify-axi server list
 coolify-axi context                     # configured instances, and which is active
 coolify-axi update --check              # is a newer release available?
+```
+
+### Clone a service
+
+```bash
+coolify-axi service get runner                 # 1. project, environment, server, destination uuids
+coolify-axi service compose runner             # 2. compose source, secrets redacted; save it to runner.yml
+coolify-axi service create --docker-compose-file runner.yml --name runner-2 \
+  --project-uuid <uuid> --environment-uuid <uuid> --server-uuid <uuid> --destination-uuid <uuid>
+coolify-axi shared-env                         # 3. which shared variable to point at
+coolify-axi service env runner-2 --set 'ACCESS_TOKEN={{team.GH_RUNNER_TOKEN}}'
+coolify-axi service start runner-2             # 4. deploy it
 ```
 
 ### Commands
@@ -134,7 +156,9 @@ coolify-axi update --check              # is a newer release available?
 | *(none)* | — | Dashboard: every resource, its type, and its state |
 | `app` | `list`, `get`, `logs`, `env`, `set`, `create`, `start`, `stop`, `restart` | Applications; `env set`/`env delete` change variables, `set` changes deploy settings |
 | `db` | `list`, `get`, `create` | Databases, with redacted connection details; `create` takes `postgres` or `redis` |
-| `service` | `list`, `get`, `create`, `delete`, `start`, `stop`, `restart`, `env` | One-click services; delete is `--yes`-gated |
+| `service` | `list`, `get`, `compose`, `create`, `delete`, `start`, `stop`, `restart`, `env` | Services from a template type or your own compose; delete is `--yes`-gated |
+| `project` | `list`, `get` | Projects and their environments (id, name, uuid) |
+| `shared-env` | `list` | Shared variable keys at team, project (`--project`), or environment (`--environment`) scope |
 | `server` | `list`, `get` | Connected servers |
 | `deploy` | `run`, `list`, `history`, `logs`, `watch` | Trigger, follow, and diagnose deployments |
 | `context` | — | Which Coolify instance commands target |
@@ -158,20 +182,34 @@ Like the AXI SDK's other tools, flags must come **after** the command
 
 - **Names, not uuids.** Every command accepts a resource name or a uuid. An ambiguous name
   stops and lists the candidates rather than acting on the wrong resource.
-- **Secrets are redacted by default.** `app env`, `service env`, and `db get` mask
-  secret-shaped values, and scrub passwords embedded in connection URLs such as
+- **Secrets are redacted by default.** `app env` and `service env` mask every value except a
+  value that is exactly a shared-variable reference (`{{team.X}}`, `{{project.X}}`,
+  `{{environment.X}}`), which names a value instead of holding one. `db get` masks
+  secret-shaped values and scrubs passwords embedded in connection URLs such as
   `postgres://user:pw@host/db`. `--reveal` opts in, and threads `--show-sensitive` through to
   the wrapped CLI.
+- **Compose is redacted, references stay.** `service compose` masks the value of every key that
+  contains `TOKEN`, `SECRET`, `KEY`, `PASS`, `PAT` (as a word, so `PATH` stays readable), or
+  `CREDENTIAL`, in map (`KEY: value`) and list (`- KEY=value`) form. It also masks GitHub
+  tokens, credentialed URLs, and private keys under any key. `${VAR}` interpolations and
+  shared-variable references stay visible. There is no `--reveal`.
+- **Shared variables print keys only.** `shared-env` lists each key with the reference to store
+  in a resource's variable, such as `{{team.GH_RUNNER_TOKEN}}`. It never prints a value.
 - **Logs are always redacted.** `app logs` and `deploy logs` mask secrets by shape (build-arg
   values, secret-named `KEY=VALUE`, credentialed URLs, bearer headers, private keys) and have no
   `--reveal`. Errors from the wrapped CLI are redacted too. `env set` never echoes values, and the
   GitHub webhook secret in `app set` is write-only: output says `set` or `cleared`.
-- **One REST exception.** `app set` changes settings the `coolify` CLI has no flags for
-  (deploy hooks, health check, watch paths, auto-deploy, webhook secret) with a Coolify API
-  `PATCH`. It reads the instance and token from the CLI's own config and never prints the token.
+- **REST where the CLI falls short.** `app set` changes settings the `coolify` CLI has no flags
+  for (deploy hooks, health check, watch paths, auto-deploy, webhook secret). `service get`,
+  `service compose`, and `project get` read fields the CLI drops (environment ids, the
+  destination, the compose source). `service create` posts to the API because the CLI cannot
+  create from a compose file. Each reads the instance and token from the CLI's own config and
+  never prints the token. `service get` shows the server and destination uuids, and
+  `service compose` shows the compose, only when the token has the `read:sensitive` ability.
 - **Idempotent state changes.** `app start`/`stop` and `service start`/`stop` exit 0 as a
   no-op when the resource is already in the target state, so agents declare intent instead of
-  reading first.
+  reading first. When Coolify ignores a lifecycle request (an old CLI that sends `GET`), the
+  command fails instead of reporting success.
 - **Destructive commands ask first.** `service delete` refuses to run without `--yes`. Without
   it, the command names the resource, its uuid, and what deletion removes, then exits 2 with
   no call reaching the wrapped CLI. `--yes` passes `--force` through so it never prompts

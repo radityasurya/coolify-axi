@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { AxiError } from "axi-sdk-js";
 import { BIN } from "./args.js";
-import { redactLogText } from "./logs.js";
+import { SHARED_REF, redactLogText } from "./logs.js";
 
 const exec = promisify(execFile);
 
@@ -80,7 +80,16 @@ export async function coolify(args, options = {}) {
     throw translate(error, argv);
   }
 
-  if (!json) return stdout.trim();
+  if (!json) {
+    // An older CLI that still GETs a lifecycle endpoint gets a 200 with this
+    // message and nothing happens — a silent no-op must not read as success.
+    if (/endpoint has changed to a POST request/i.test(stdout)) {
+      throw new AxiError("Coolify ignored the request: the `coolify` CLI is too old for this instance", "COOLIFY_ERROR", [
+        "Upgrade the CLI with `coolify update`, then retry",
+      ]);
+    }
+    return stdout.trim();
+  }
   const trimmed = stdout.trim();
   if (!trimmed) return [];
   try {
@@ -110,23 +119,21 @@ export async function currentContext(options = {}) {
  * Redact by default — an agent printing a transcript must not leak them.
  */
 /**
- * Mask one value, deciding from the NAME it is filed under. Env vars are
- * `{ key, value }` pairs, so the deciding name is the variable's own key —
- * never the record's field names.
+ * Mask one env value. Listings are fetched in clear so that a shared-variable
+ * reference (`{{team.X}}`) can be shown — it names a value, it is not one —
+ * and every other value is masked, whatever its key is called: a name-based
+ * rule lets a secret filed under an innocent key (`ADMIN_PW`) through.
  */
-export function redactValue(name, value, reveal = false) {
-  if (reveal || !value) return value;
-  if (SECRET_KEY.test(name)) return REDACTED;
-  if (typeof value === "string" && URL_CREDENTIALS.test(value)) {
-    return value.replace(URL_CREDENTIALS, "$1<redacted>$3");
-  }
-  return value;
+export function maskEnvValue(value, reveal = false) {
+  if (reveal || !value || SHARED_REF.test(value)) return value;
+  return REDACTED;
 }
 
 export function redact(record, reveal = false) {
   if (reveal) return record;
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => {
+      if (typeof value === "string" && SHARED_REF.test(value)) return [key, value];
       if (SECRET_KEY.test(key) && value) return [key, REDACTED];
       if (typeof value === "string" && URL_CREDENTIALS.test(value)) {
         return [key, value.replace(URL_CREDENTIALS, "$1<redacted>$3")];

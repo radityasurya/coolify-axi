@@ -32,8 +32,9 @@ npm run check:skill
   new upstream field should stay out of default output unless it informs a decision.
 - **Every mutation is idempotent or says why not.** If a command cannot be safely re-run,
   that belongs in a comment and in the command's `--help`.
-- **Secrets never widen.** New fields that could carry a credential go through `redact()` or
-  `redactValue()`, and `--reveal` must thread `--show-sensitive` to the wrapped CLI.
+- **Secrets never widen.** New fields that could carry a credential go through `redact()`,
+  env values through `maskEnvValue()`, and compose source through `redactCompose()`.
+  `--reveal` must thread `--show-sensitive` to the wrapped CLI.
 - **Read [AGENTS.md](AGENTS.md) first.** It documents the traps that have already bitten,
   including two inverted-redaction bugs.
 
