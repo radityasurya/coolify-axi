@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { contextCommand } from "../src/commands/context.js";
 import { dbCommand } from "../src/commands/db.js";
 import { deployCommand } from "../src/commands/deploy.js";
-import { coolify, health, redact, summarize } from "../src/coolify.js";
+import { coolify, health, maskEnvValue, redact, summarize } from "../src/coolify.js";
 import { useFakeCoolify } from "./helpers.js";
 
 test.beforeEach(useFakeCoolify);
@@ -40,6 +40,19 @@ test("redact catches password, secret, token, and key shapes", () => {
   assert.match(out.api_token, /redacted/);
   assert.match(out.ssh_key, /redacted/);
   assert.equal(out.name, "keep");
+});
+
+test("a shared-variable reference is not a secret, under any key", () => {
+  assert.equal(maskEnvValue("{{team.GH_RUNNER_TOKEN}}"), "{{team.GH_RUNNER_TOKEN}}");
+  assert.equal(maskEnvValue("{{ project.ACCESS_TOKEN }}"), "{{ project.ACCESS_TOKEN }}");
+  assert.equal(redact({ api_token: "{{environment.API_TOKEN}}" }).api_token, "{{environment.API_TOKEN}}");
+});
+
+test("anything that only looks like a reference is still masked", () => {
+  for (const value of ["{{team.X}}-suffix", "prefix{{team.X}}", "{{server.X}}", "{{team.X-Y}}", "hunter2", "8080"]) {
+    assert.match(maskEnvValue(value), /redacted/, value);
+  }
+  assert.equal(maskEnvValue("hunter2", true), "hunter2", "--reveal prints the value");
 });
 
 test("db get redacts connection secrets by default", async () => {

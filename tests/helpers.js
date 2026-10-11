@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,36 @@ export function useFakeCoolify() {
   process.env.COOLIFY_AXI_BIN = FAKE;
   delete process.env.FAKE_COOLIFY_FAIL;
   delete process.env.FAKE_COOLIFY_LOG;
+  delete process.env.FAKE_COOLIFY_STDOUT;
+}
+
+const realFetch = globalThis.fetch;
+
+/**
+ * Point the REST client at a fake instance. `routes` maps `METHOD /path`
+ * (relative to /api/v1) to a JSON body; anything else answers 404. Returns
+ * every request seen, with its parsed body.
+ */
+export function fakeApi(routes) {
+  const path = join(mkdtempSync(join(tmpdir(), "coolify-axi-api-")), "config.json");
+  writeFileSync(
+    path,
+    JSON.stringify({ instances: [{ name: "hireopz", fqdn: "https://panel.example.com", token: "7|faketoken", default: true }] }),
+  );
+  process.env.COOLIFY_AXI_CONFIG = path;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    const key = `${init.method} ${new URL(url).pathname.replace(/^\/api\/v1/, "")}`;
+    seen.push({ key, body: init.body === undefined ? undefined : JSON.parse(init.body) });
+    const hit = key in routes;
+    return { ok: hit, status: hit ? 200 : 404, text: async () => JSON.stringify(hit ? routes[key] : { message: "Not found." }) };
+  };
+  return seen;
+}
+
+export function restoreApi() {
+  globalThis.fetch = realFetch;
+  delete process.env.COOLIFY_AXI_CONFIG;
 }
 
 /**

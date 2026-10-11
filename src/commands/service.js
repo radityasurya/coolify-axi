@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
 import { AxiError } from "axi-sdk-js";
-import { coolify, health, matchOrRaise, redactValue, summarize } from "../coolify.js";
+import { api } from "../api.js";
+import { coolify, health, maskEnvValue, matchOrRaise, pick, summarize } from "../coolify.js";
 import { BIN, helpFor, makeDispatcher, parse, required, wantsHelp } from "../args.js";
+import { redactCompose } from "../logs.js";
 
-// `service list` rows carry the full docker-compose source; the detail view is
-// an allow-list so that noise never reaches the agent.
+// The API detail carries the compose source and, for a read:sensitive token,
+// the destination's server with its settings; the view is an allow-list.
 const DETAIL_FIELDS = ["name", "uuid", "status", "description", "fqdn"];
 
 const HELP = {
@@ -15,31 +18,45 @@ const HELP = {
   }),
   get: helpFor({
     command: "service get",
-    description: "Show one service by name or uuid",
+    description:
+      "Show one service: state, project and environment, server and destination uuids, and its env var keys",
     usage: `${BIN} service get <name|uuid>`,
+    notes: "server_uuid and destination_uuid appear only when the API token has the read:sensitive ability",
     examples: [`${BIN} service get cAdvisor`],
+  }),
+  compose: helpFor({
+    command: "service compose",
+    description: "Print a service's Docker Compose source with secret values redacted",
+    usage: `${BIN} service compose <name|uuid>`,
+    notes:
+      "Values under keys containing TOKEN, SECRET, KEY, PASS, PAT or CREDENTIAL are masked, as are GitHub tokens " +
+      "and credentialed URLs. ${VAR} interpolations and {{team.X}} references stay visible. There is no --reveal.",
+    examples: [`${BIN} service compose cAdvisor`],
   }),
   create: helpFor({
     command: "service create",
-    description: "Create a one-click service from a template type",
+    description: "Create a service from a one-click template type or from your own Docker Compose file",
     usage:
-      `${BIN} service create <type> --project-uuid <uuid> --server-uuid <uuid> ` +
-      `[--environment-name <name>|--environment-uuid <uuid>] [--name <name>] ` +
-      `[--description <text>] [--docker-compose <content>] [--instant-deploy]`,
+      `${BIN} service create <type>|--docker-compose-file <path> --project-uuid <uuid> --server-uuid <uuid> ` +
+      `[--destination-uuid <uuid>] [--environment-name <name>|--environment-uuid <uuid>] [--name <name>] ` +
+      `[--description <text>] [--instant-deploy]`,
     flags: {
-      "--project-uuid": "Project to create the service in (required)",
+      "--project-uuid": "Project to create the service in (required; `project list` shows them)",
       "--server-uuid": "Server to create the service on (required)",
-      "--environment-name": "Environment by name (for example production); replaces --environment-uuid",
+      "--destination-uuid": "Docker network destination; required when the server has more than one",
+      "--environment-name": "Environment by name; production when neither environment flag is given",
       "--environment-uuid": "Environment by uuid; replaces --environment-name",
-      "--name": "Service name; the type when omitted",
+      "--name": "Service name",
       "--description": "Service description",
-      "--docker-compose": "Custom Docker Compose content, replacing the template's own",
+      "--docker-compose-file": "Read the Docker Compose source from this file; replaces <type>",
+      "--docker-compose": "Docker Compose source given inline; replaces <type>",
       "--instant-deploy": "Deploy immediately after creation",
       "--list-types": "Print every valid <type> instead of creating anything",
     },
     examples: [
       `${BIN} service create --list-types`,
       `${BIN} service create n8n --project-uuid <uuid> --server-uuid <uuid> --environment-name production`,
+      `${BIN} service create --docker-compose-file compose.yml --name runner-2 --project-uuid <uuid> --server-uuid <uuid> --destination-uuid <uuid>`,
     ],
   }),
   delete: helpFor({
@@ -60,12 +77,13 @@ const HELP = {
     description: "List a service's environment variables, or set them with --set (idempotent)",
     usage: `${BIN} service env <name|uuid> [--reveal] [--set KEY=VALUE ...]`,
     flags: {
-      "--reveal": "Print secret values in clear text",
+      "--reveal": "Print every value in clear text; without it only shared-variable references such as {{team.X}} show",
       "--set": "KEY=VALUE to create or update, repeatable; values are never echoed back",
     },
     examples: [
       `${BIN} service env cAdvisor`,
       `${BIN} service env cAdvisor --set N8N_HOST=https://n8n.example`,
+      `${BIN} service env runner-2 --set 'ACCESS_TOKEN={{team.GH_RUNNER_TOKEN}}'`,
     ],
   }),
 };
@@ -97,13 +115,71 @@ async function get(argv) {
   const rows = await coolify(["service", "list"], options);
   const found = matchOrRaise(rows, selector, "service");
 
-  const detail = await coolify(["service", "get", found.uuid], options);
+  // The wrapped CLI drops environment_id and the destination, so the detail
+  // comes from the API. A service names its environment only by id; the
+  // project tree maps it back to names and uuids.
+  const [detail, tree, vars] = await Promise.all([
+    api("GET", `/services/${found.uuid}`, undefined, options),
+    projectTree(options),
+    coolify(["service", "env", "list", found.uuid], options),
+  ]);
+  const place = locate(tree, detail?.environment_id);
+  const fields = {
+    ...pick(detail, DETAIL_FIELDS),
+    project: place?.project.name,
+    project_uuid: place?.project.uuid,
+    environment: place?.environment.name,
+    environment_uuid: place?.environment.uuid,
+    server_uuid: detail?.destination?.server?.uuid,
+    destination_uuid: detail?.destination?.uuid,
+  };
+  const keys = (Array.isArray(vars) ? vars : []).map((entry) => entry.key);
   return {
-    service: Object.fromEntries(
-      DETAIL_FIELDS.filter((field) => detail[field] !== undefined && detail[field] !== "").map(
-        (field) => [field, detail[field]],
-      ),
-    ),
+    service: {
+      ...pick(fields, Object.keys(fields)),
+      env_keys: keys.length ? keys : "0 environment variables",
+    },
+    ...(fields.server_uuid ? {} : { note: "server_uuid and destination_uuid need an API token with the read:sensitive ability" }),
+    help: [`Run \`${BIN} service compose ${found.name}\` for its Docker Compose source, secrets redacted`],
+  };
+}
+
+/** Every project with its environments (id, name, uuid). */
+async function projectTree(options) {
+  const projects = await coolify(["project", "list"], options);
+  return Promise.all(projects.map((project) => api("GET", `/projects/${project.uuid}`, undefined, options)));
+}
+
+function locate(tree, environmentId) {
+  for (const project of tree) {
+    const environment = (project?.environments ?? []).find((env) => env.id === environmentId);
+    if (environment) return { project, environment };
+  }
+  return undefined;
+}
+
+async function compose(argv) {
+  if (wantsHelp(argv)) return HELP.compose;
+  const { values, positionals } = parse(argv, { command: "service compose" });
+  const selector = required(positionals[0], "<name|uuid>", "service compose", `${BIN} service compose cAdvisor`);
+  const options = { context: values.context };
+
+  const found = matchOrRaise(await coolify(["service", "list"], options), selector, "service");
+  const detail = await api("GET", `/services/${found.uuid}`, undefined, options);
+  if (!detail?.docker_compose_raw) {
+    throw new AxiError(`Coolify returned no compose for ${found.name}`, "AUTH_ERROR", [
+      "The API shows compose only to a token with the read:sensitive ability; create one in the Coolify dashboard",
+    ]);
+  }
+  return {
+    service: found.name,
+    compose: redactCompose(detail.docker_compose_raw),
+    note: "secret values redacted; ${VAR} and {{team.X}} references kept",
+    help: [
+      `To clone it, save the compose to a file, then run \`${BIN} service create --docker-compose-file <path> ` +
+        `--name <new-name> --project-uuid <uuid> --environment-uuid <uuid> --server-uuid <uuid> --destination-uuid <uuid>\` ` +
+        `(uuids from \`${BIN} service get ${found.name}\`)`,
+    ],
   };
 }
 
@@ -118,7 +194,9 @@ async function create(argv) {
       "environment-uuid": { type: "string" },
       name: { type: "string" },
       description: { type: "string" },
+      "destination-uuid": { type: "string" },
       "docker-compose": { type: "string" },
+      "docker-compose-file": { type: "string" },
       "instant-deploy": { type: "boolean" },
       "list-types": { type: "boolean" },
     },
@@ -139,51 +217,75 @@ async function create(argv) {
     };
   }
 
-  const type = required(
-    positionals[0],
-    "<type>",
-    "service create",
-    `${BIN} service create n8n --project-uuid <uuid> --server-uuid <uuid>`,
-  );
-  const projectUuid = required(
-    values["project-uuid"],
-    "--project-uuid",
-    "service create",
-    `${BIN} service create ${type} --project-uuid <uuid> --server-uuid <uuid>`,
-  );
-  const serverUuid = required(
-    values["server-uuid"],
-    "--server-uuid",
-    "service create",
-    `${BIN} service create ${type} --project-uuid ${projectUuid} --server-uuid <uuid>`,
-  );
+  const type = positionals[0];
+  const example = `${BIN} service create --docker-compose-file compose.yml --project-uuid <uuid> --server-uuid <uuid>`;
+  if (values["docker-compose"] !== undefined && values["docker-compose-file"]) {
+    throw new AxiError("pass --docker-compose or --docker-compose-file, not both", "VALIDATION_ERROR", [example]);
+  }
+  const source = values["docker-compose-file"] ? readCompose(values["docker-compose-file"]) : values["docker-compose"];
+  // Coolify refuses a body that carries both a template type and a compose.
+  if (type && source !== undefined) {
+    throw new AxiError("pass a <type> or a compose, not both", "VALIDATION_ERROR", [
+      `A template: ${BIN} service create ${type} --project-uuid <uuid> --server-uuid <uuid>`,
+      `Your own compose: ${example}`,
+    ]);
+  }
+  if (!type && source === undefined) {
+    throw new AxiError("<type> or --docker-compose-file is required", "VALIDATION_ERROR", [
+      example,
+      `Run \`${BIN} service create --list-types\` for the template types`,
+    ]);
+  }
+  if (source !== undefined && !source.trim()) {
+    throw new AxiError("the compose is empty", "VALIDATION_ERROR", [example]);
+  }
+  const projectUuid = required(values["project-uuid"], "--project-uuid", "service create", example);
+  const serverUuid = required(values["server-uuid"], "--server-uuid", "service create", example);
   if (values["environment-name"] && values["environment-uuid"]) {
     throw new AxiError("pass --environment-name or --environment-uuid, not both", "VALIDATION_ERROR", [
-      `Example: ${BIN} service create ${type} --environment-name production`,
+      `Example: ${BIN} service create ${type ?? "<type>"} --environment-name production`,
     ]);
   }
 
-  const args = ["service", "create", type, "--project-uuid", projectUuid, "--server-uuid", serverUuid];
-  if (values["environment-name"]) args.push("--environment-name", values["environment-name"]);
-  if (values["environment-uuid"]) args.push("--environment-uuid", values["environment-uuid"]);
-  if (values.name) args.push("--name", values.name);
-  if (values.description) args.push("--description", values.description);
-  if (values["docker-compose"]) args.push("--docker-compose", values["docker-compose"]);
-  if (values["instant-deploy"]) args.push("--instant-deploy");
-  // Mutations answer with a plain-text confirmation, not JSON.
-  await coolify(args, { ...options, json: false });
+  // The API, not the wrapped CLI: the CLI sends `docker_compose` and
+  // `environment`, which Coolify rejects, and cannot create without a type.
+  const body = {
+    ...(type ? { type } : { docker_compose_raw: Buffer.from(source).toString("base64") }),
+    project_uuid: projectUuid,
+    server_uuid: serverUuid,
+    ...(values["destination-uuid"] ? { destination_uuid: values["destination-uuid"] } : {}),
+    ...(values["environment-uuid"]
+      ? { environment_uuid: values["environment-uuid"] }
+      : { environment_name: values["environment-name"] ?? "production" }),
+    ...(values.name ? { name: values.name } : {}),
+    ...(values.description ? { description: values.description } : {}),
+    instant_deploy: Boolean(values["instant-deploy"]),
+  };
+  const created = await api("POST", "/services", body, options);
+  const uuid = created?.uuid;
+  const domains = Array.isArray(created?.domains) ? created.domains : [];
 
   return {
-    created: type,
+    created: type ?? "custom compose",
     ...(values.name ? { name: values.name } : {}),
+    ...(uuid ? { uuid } : {}),
+    ...(domains.length ? { domains } : {}),
     ...(values["instant-deploy"] ? { deploying: true } : {}),
     help: [
-      `Run \`${BIN} service list\` to see the new service and its uuid`,
-      ...(values["instant-deploy"]
-        ? []
-        : [`Run \`${BIN} service start ${values.name ?? type}\` to deploy it`]),
+      `Run \`${BIN} service env ${uuid ?? "<uuid>"} --set KEY=VALUE\` to set its variables`,
+      ...(values["instant-deploy"] ? [] : [`Run \`${BIN} service start ${uuid ?? "<uuid>"}\` to deploy it`]),
     ],
   };
+}
+
+function readCompose(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    throw new AxiError(`cannot read --docker-compose-file ${path} (${error.code ?? "unreadable"})`, "VALIDATION_ERROR", [
+      "Pass the path to a Docker Compose YAML file",
+    ]);
+  }
 }
 
 async function remove(argv) {
@@ -231,7 +333,8 @@ function stateChanger(action, desired) {
     if (desired && state === desired) {
       return { service: found.name, state, unchanged: true, note: `already ${desired} (no-op)` };
     }
-    await coolify(["service", action, found.uuid], options);
+    // The wrapped CLI answers with a plain-text message, not JSON.
+    await coolify(["service", action, found.uuid], { ...options, json: false });
     return {
       service: found.name,
       action,
@@ -252,12 +355,9 @@ async function env(argv) {
 
   const rows = await coolify(["service", "list"], options);
   const found = matchOrRaise(rows, selector, "service");
-  // The wrapped CLI masks values as `********` unless asked; --reveal has to
-  // reach it, or it returns asterisks instead of the value.
-  const vars = await coolify(
-    ["service", "env", "list", found.uuid, ...(values.reveal ? ["--show-sensitive"] : [])],
-    options,
-  );
+  // Fetched in clear even without --reveal: the wrapped CLI would turn a
+  // shared-variable reference into `********`. maskEnvValue masks the rest.
+  const vars = await coolify(["service", "env", "list", found.uuid, "--show-sensitive"], options);
   const current = Array.isArray(vars) ? vars : [];
 
   if (values.set?.length) return await setEnv(found, current, values.set, options);
@@ -270,10 +370,10 @@ async function env(argv) {
     count: `${current.length} total`,
     env: current.map((entry) => ({
       key: entry.key,
-      value: redactValue(entry.key, entry.value, values.reveal),
+      value: maskEnvValue(entry.value, values.reveal),
       build_time: Boolean(entry.is_build_time),
     })),
-    ...(values.reveal ? {} : { note: "values redacted; pass --reveal to print them" }),
+    ...(values.reveal ? {} : { note: "values redacted except shared-variable references; pass --reveal to print them" }),
   };
 }
 
@@ -300,8 +400,6 @@ async function setEnv(found, rows, pairs, options) {
       applied.push({ key, unchanged: true });
       continue;
     }
-    // The listing masks secrets as `********`, so an unchanged secret cannot be
-    // detected by comparison — writing it again is the safe way round.
     const verb = current.has(key) ? "update" : "create";
     const args = current.has(key)
       ? ["service", "env", "update", found.uuid, key, "--value", value]
@@ -324,6 +422,7 @@ export const serviceCommand = makeDispatcher(
   {
     list,
     get,
+    compose,
     create,
     delete: remove,
     start: stateChanger("start", "running"),
@@ -335,8 +434,9 @@ export const serviceCommand = makeDispatcher(
     fallback: "list",
     summary: {
       list: "List one-click services",
-      get: "Show one service by name or uuid",
-      create: "Create a service from a template type (--list-types to enumerate)",
+      get: "Show one service: project, environment, server, destination, env keys",
+      compose: "Print a service's Docker Compose source, secrets redacted",
+      create: "Create a service from a template type or a compose file (--list-types to enumerate)",
       delete: "Delete a service (requires --yes)",
       start: "Start a service (idempotent)",
       stop: "Stop a service (idempotent)",

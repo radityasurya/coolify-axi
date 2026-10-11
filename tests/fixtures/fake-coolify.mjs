@@ -48,11 +48,9 @@ const TABLE = {
   [`service get ${SERVICES[0].uuid}`]: { ...SERVICES[0], docker_compose: "services:\n  cadvisor:\n    image: gcr.io/cadvisor/cadvisor" },
   [`service get ${SERVICES[1].uuid}`]: SERVICES[1],
   [`server get ${SERVERS[0].uuid}`]: SERVERS[0],
-  [`service start ${SERVICES[1].uuid}`]: { message: "starting" },
-  [`service stop ${SERVICES[0].uuid}`]: { message: "stopping" },
-  [`service restart ${SERVICES[0].uuid}`]: { message: "restarting" },
   [`service env list ${SERVICES[0].uuid}`]: [
     { key: "PORT", value: "8080", is_build_time: false },
+    { key: "ACCESS_TOKEN", value: "{{project.ACCESS_TOKEN}}", is_build_time: false },
     { key: "SERVICE_API_TOKEN", value: "hunter2", is_build_time: false },
     { key: "DATABASE_URL", value: "postgres://svc:hunter2@db/svc", is_build_time: false },
   ],
@@ -71,8 +69,15 @@ const TABLE = {
   [`app env list ${RESOURCES[0].uuid}`]: [
     { uuid: "envnode", key: "NODE_ENV", value: "production", is_build_time: false },
     { uuid: "envpass", key: "DATABASE_PASSWORD", value: "hunter2", is_build_time: false },
+    { uuid: "envref", key: "SHARED_DSN", value: "{{ environment.SENTRY_DSN }}", is_build_time: false },
   ],
   "project list": [{ uuid: "prj1".padEnd(24, "x"), name: "blog", description: "" }],
+  // The real CLI masks shared values unless --show-sensitive; a clear value
+  // here proves the wrapper never prints one either way.
+  "shared-env team list": [{ id: 1, key: "GH_RUNNER_TOKEN", value: "ghp_TeamSecretValue0123456789abcdef", is_literal: false }],
+  [`shared-env project list ${"prj1".padEnd(24, "x")}`]: [{ id: 2, key: "ACCESS_TOKEN", value: "********" }],
+  [`shared-env environment list ${"prj1".padEnd(24, "x")} production`]: [{ id: 3, key: "DB_URL", value: "********" }],
+  [`shared-env environment list ${"prj1".padEnd(24, "x")} staging`]: [],
   "github list": [{ uuid: "gh1".padEnd(24, "x"), name: "acme-gh" }],
   "app create public": { uuid: "newapp".padEnd(24, "x"), domains: "https://web.example" },
   "app create github": { uuid: "newapp".padEnd(24, "x"), domains: "" },
@@ -87,12 +92,10 @@ const TABLE = {
     external_db_url: "postgres://postgres:S3cr3tPw@1.2.3.4:5433/postgres",
   },
   "database create redis": { uuid: "newrds".padEnd(24, "x"), name: "cache", redis_password: "R3disPw", internal_db_url: "redis://default:R3disPw@newrds:6379/0" },
-  [`app stop ${RESOURCES[0].uuid}`]: { message: "stopping" },
   [`app update ${RESOURCES[0].uuid}`]: { message: "updated" },
   [`app env create ${RESOURCES[0].uuid}`]: { message: "created" },
   [`app env update ${RESOURCES[0].uuid} NODE_ENV`]: { message: "updated" },
   [`app env update ${RESOURCES[0].uuid} DATABASE_PASSWORD`]: { message: "updated" },
-  [`app start ${RESOURCES[1].uuid}`]: { message: "starting" },
   // The real CLI wraps the queued deployment in `{ deployments: [...] }`.
   [`deploy uuid ${RESOURCES[0].uuid}`]: {
     deployments: [{ message: "Deployment request queued.", resource_uuid: RESOURCES[0].uuid, deployment_uuid: "dep1" }],
@@ -127,6 +130,11 @@ if (process.env.FAKE_COOLIFY_LOG) {
 // Exit 1 with only the banner on stderr, so the wrapper sees execFile's own
 // "Command failed: <argv>" message — the path that used to echo flag values.
 if (process.env.FAKE_COOLIFY_SILENT_FAIL && key.startsWith(process.env.FAKE_COOLIFY_SILENT_FAIL)) process.exit(1);
+// A 200 that did nothing: what an old CLI that GETs a lifecycle endpoint prints.
+if (process.env.FAKE_COOLIFY_STDOUT) {
+  process.stdout.write(`${process.env.FAKE_COOLIFY_STDOUT}\n`);
+  process.exit(0);
+}
 if (process.env.FAKE_COOLIFY_FAIL) {
   process.stderr.write(`Error: ${process.env.FAKE_COOLIFY_FAIL}\n`);
   process.exit(1);
@@ -158,6 +166,12 @@ if (key === `app deployments list ${RESOURCES[1].uuid}`) {
 // The real CLI answers mutations with a plain-text confirmation rather than
 // JSON, so parsing their output would fail an otherwise successful write.
 const PLAIN_TEXT = new Set([
+  // Lifecycle commands print the API's message, e.g. "Service starting request queued."
+  `service start ${SERVICES[1].uuid}`,
+  `service stop ${SERVICES[0].uuid}`,
+  `service restart ${SERVICES[0].uuid}`,
+  `app stop ${RESOURCES[0].uuid}`,
+  `app start ${RESOURCES[1].uuid}`,
   `app update ${RESOURCES[0].uuid}`,
   `app env create ${RESOURCES[0].uuid}`,
   `app env update ${RESOURCES[0].uuid} NODE_ENV`,
@@ -178,7 +192,11 @@ if (key === "service create") {
 }
 if (PLAIN_TEXT.has(key)) {
   process.stdout.write(
-    key.startsWith("service") ? "Service command completed successfully\n" : "Environment variable updated successfully\n",
+    /^(service|app) (start|stop|restart) /.test(key)
+      ? "Service starting request queued.\n"
+      : key.startsWith("service")
+        ? "Service command completed successfully\n"
+        : "Environment variable updated successfully\n",
   );
   process.exit(0);
 }

@@ -8,7 +8,7 @@ import { appCommand } from "./commands/app.js";
 import { contextCommand } from "./commands/context.js";
 import { dbCommand } from "./commands/db.js";
 import { deployCommand } from "./commands/deploy.js";
-import { serverCommand } from "./commands/infra.js";
+import { projectCommand, serverCommand, sharedEnvCommand } from "./commands/infra.js";
 import { serviceCommand } from "./commands/service.js";
 import { setupCommand } from "./commands/setup.js";
 import { VERSION } from "./version.js";
@@ -22,7 +22,9 @@ export const TOP_HELP = `${encode({
     "(none)": "dashboard — every resource and its health",
     app: "list, get, create, set, logs, env (set, delete), domain, start, stop, restart",
     db: "list, get, create",
-    service: "list, get, create, delete, start, stop, restart, env",
+    service: "list, get, compose, create, delete, start, stop, restart, env",
+    project: "list, get (environments with id, name, uuid)",
+    "shared-env": "shared variable keys at team, project, or environment scope",
     server: "list, get",
     deploy: "run, list, history, logs, watch",
     context: "show configured Coolify instances",
@@ -39,6 +41,7 @@ export const TOP_HELP = `${encode({
     `${BIN} app list --status exited`,
     `${BIN} app env set digivaley KEY=value`,
     `${BIN} app set digivaley --pre-deploy "pnpm db:migrate"`,
+    `${BIN} service compose cAdvisor`,
   ],
   help: [`Run \`${BIN} <command> --help\` for a command reference`],
 })}\n`;
@@ -90,6 +93,8 @@ export async function main() {
       app: appCommand,
       db: dbCommand,
       service: serviceCommand,
+      project: projectCommand,
+      "shared-env": sharedEnvCommand,
       server: serverCommand,
       deploy: deployCommand,
       context: contextCommand,

@@ -4,6 +4,7 @@ import {
   collapseRepeats,
   grepLines,
   normalizeEntries,
+  redactCompose,
   redactLogText,
   renderEntries,
   resolvedCommit,
@@ -140,4 +141,90 @@ test("resolvedCommit recovers the SHA an API-triggered HEAD deploy actually buil
   assert.equal(resolvedCommit(normalizeEntries(ENTRIES, { debug: true }), "HEAD"), SHA);
   assert.equal(resolvedCommit([], "HEAD"), "HEAD");
   assert.equal(resolvedCommit([], "abc1234"), "abc1234");
+});
+
+// ---- redactCompose ----
+
+const GH = {
+  ghp: "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+  gho: "gho_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2",
+  ghs: "ghs_" + "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8",
+  pat: "github_pat_" + "11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz0123456789",
+};
+
+test("redactCompose masks secret-named keys in map and list form", () => {
+  for (const key of ["API_TOKEN", "CLIENT_SECRET", "SECRET_KEY_BASE", "DB_PASSWORD", "SMTP_PASS", "GH_PAT", "aws_credentials"]) {
+    assert.equal(redactCompose(`      ${key}: hunter2`), `      ${key}: <redacted>`, `map ${key}`);
+    assert.equal(redactCompose(`      - ${key}=hunter2`), `      - ${key}=<redacted>`, `list ${key}`);
+  }
+});
+
+test("redactCompose keeps quotes around a masked value", () => {
+  assert.equal(redactCompose(`  - "DB_PASSWORD=hunter2"`), `  - "DB_PASSWORD=<redacted>"`);
+  assert.equal(redactCompose(`  - 'DB_PASSWORD=hunter2'`), `  - 'DB_PASSWORD=<redacted>'`);
+  assert.equal(redactCompose(`  SECRET: "hunter2"`), `  SECRET: "<redacted>"`);
+  assert.equal(redactCompose(`  "SECRET": 'hunter2'`), `  "SECRET": '<redacted>'`);
+});
+
+test("redactCompose keeps ${VAR} interpolations and shared-variable references visible", () => {
+  const kept = [
+    "  - ACCESS_TOKEN=${ACCESS_TOKEN}",
+    "  ACCESS_TOKEN: ${ACCESS_TOKEN}",
+    '  ACCESS_TOKEN: "${ACCESS_TOKEN}"',
+    "  DB_PASSWORD: $SERVICE_PASSWORD_POSTGRES",
+    "  API_KEY: ${PREFIX}${SUFFIX}",
+    "  - GH_PAT={{team.GH_RUNNER_TOKEN}}",
+    "  RUNNER_TOKEN: {{ project.RUNNER_TOKEN }}",
+    "  SECRET: {{environment.APP_SECRET}}",
+    "  DATABASE_URL: postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@db:5432/app",
+  ];
+  for (const line of kept) assert.equal(redactCompose(line), line);
+});
+
+test("redactCompose masks a literal default inside ${VAR:-default} but keeps the name", () => {
+  assert.equal(redactCompose("  API_KEY: ${API_KEY:-hunter2}"), "  API_KEY: ${API_KEY:-<redacted>}");
+});
+
+test("redactCompose leaves non-secret keys, image names, and PATH-like keys readable", () => {
+  const kept = [
+    "    image: myoung34/github-runner:latest",
+    "    image: ghcr.io/acme/app@sha256:0123456789abcdef",
+    "  - REPO_URL=https://github.com/acme/app",
+    "  DATA_PATH: /var/lib/data",
+    "  PATH: /usr/local/bin",
+    "  PORT: 8080",
+    "      - traefik.enable=true",
+    "    restart: unless-stopped",
+  ];
+  for (const line of kept) assert.equal(redactCompose(line), line);
+});
+
+test("redactCompose masks GitHub token shapes under any key", () => {
+  for (const token of Object.values(GH)) {
+    const out = redactCompose(`  - NOTE=${token}\n  RUNNER_URL: https://x.example/?t=${token}`);
+    assert.ok(!out.includes(token), `leaked ${token.slice(0, 6)}`);
+  }
+});
+
+test("redactCompose masks credentials in connection URLs under any key", () => {
+  const out = redactCompose("  DATABASE_URL: postgres://admin:hunter2@db:5432/app\n  - CACHE=redis://:hunter2@cache:6379");
+  assert.match(out, /postgres:\/\/admin:<redacted>@db:5432\/app/);
+  assert.ok(!out.includes("hunter2"));
+});
+
+test("redactCompose masks a block scalar under a secret key, then resumes", () => {
+  const out = redactCompose(
+    ["    PRIVATE_KEY: |", "      line-one-secret", "      line-two-secret", "    PORT: 8080"].join("\n"),
+  );
+  assert.equal(out, ["    PRIVATE_KEY: |", "      <redacted>", "      <redacted>", "    PORT: 8080"].join("\n"));
+});
+
+test("redactCompose masks a PEM private key wherever it appears", () => {
+  const out = redactCompose("  cert: |\n    -----BEGIN RSA PRIVATE KEY-----\n    MIIEsecret\n    -----END RSA PRIVATE KEY-----");
+  assert.ok(!out.includes("MIIEsecret"));
+});
+
+test("redactCompose returns empty input unchanged", () => {
+  assert.equal(redactCompose(""), "");
+  assert.equal(redactCompose(undefined), "");
 });
