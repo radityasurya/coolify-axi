@@ -24,9 +24,16 @@ contexts still have one owner. The token goes into the `Authorization` header an
 else: errors carry only a redacted `message` from the body, never the raw body, and the
 token string is scrubbed from every error. Reach for it only when the CLI cannot do the job.
 
+Current users, each because the CLI (1.9) falls short: `app set` (no flags), `project get`
+and `service get` (the CLI's models drop environment `id`, `environment_id`, and the
+destination), `service compose` (same detail payload), and `service create` (the CLI sends
+`docker_compose` and `environment`, which Coolify rejects, and requires a template type).
+`GET /services/{uuid}` returns the compose and `destination.server` (with server secrets in
+`settings`) only to a `read:sensitive` token: project the uuids out, never the object.
+
 ## Logs have no field names to redact on (`src/logs.js`)
 
-`redact()`/`redactValue()` decide from a name. Log lines are free text, so
+`redact()` decides from a name. Log lines are free text, so
 `redactLogText()` masks by shape: secret-named `KEY=VALUE` / `KEY: VALUE`, **every**
 `--build-arg`, `ARG`, and `docker -e`/`--env` value (Coolify passes all env vars that
 way, `DATABASE_URL` included), PEM private-key blocks, credentialed URLs anywhere in a line
@@ -74,6 +81,23 @@ early version of `--reveal` only skipped *our* redaction, so it faithfully print
 wrapped CLI's asterisks. Any new command that surfaces a secret must append
 `--show-sensitive` to the child argv when `--reveal` is set, not just bypass `redact()`.
 
+## Env values: everything masked except shared-variable references (`src/coolify.js#maskEnvValue`)
+
+The wrapped CLI masks every env value as `********` without `--show-sensitive`, which also
+hides a shared-variable reference (`{{team.X}}`) that an agent needs to see. `app env` and
+`service env` therefore always fetch with `--show-sensitive` and pass each value through
+`maskEnvValue()`: a value that is exactly a reference prints as is, and every other value is
+masked whatever its key is called. A name-based rule would print a secret filed under an
+innocent key (`ADMIN_PW`). `--set` comparisons see real values, so re-setting a stored value
+is a true no-op.
+
+## Compose is free text with key names (`src/logs.js#redactCompose`)
+
+`service compose` masks values under secret-named keys line by line (map, list, and block
+scalar forms), then applies the shared token and URL shapes. `${VAR}` and shared-variable
+references stay visible because a clone needs them; the credentialed-URL rule skips a
+password that is a `${VAR}`. `PAT` matches only as a word so `PATH` keys survive a clone.
+
 ## Redaction decides from the name a value is filed under (`src/coolify.js`)
 
 `redact(record)` matches the record's **field names**. An `app env` row is
@@ -81,9 +105,8 @@ wrapped CLI's asterisks. Any new command that surfaces a secret must append
 named `key` and redacted the variable's *name*, leaving its secret *value* in the clear.
 Exactly backwards, and caught only by an assertion on which half was masked.
 
-Use `redactValue(name, value, reveal)` whenever the deciding name is data (an env var's
-key) rather than a schema field. `redact()` is for records whose field names *are* the
-schema, like a database detail payload.
+Env rows now go through `maskEnvValue()` (above), which does not decide by name at all.
+`redact()` is for records whose field names *are* the schema, like a database detail payload.
 
 ## Key-name matching alone leaks connection strings (`src/coolify.js`)
 
@@ -180,6 +203,14 @@ Two traps stacked here, both surfaced only on Node 20 in CI:
 Naming the directory `tests` fixes both: `tests/*.test.js` still matches the default
 `**/*.test.js` pattern by name, while `tests/helpers.js` and `tests/fixtures/**` match none
 of the default patterns and stay out of the run. Do not rename it back to `test/`.
+
+## Lifecycle commands print text, not JSON (`src/coolify.js#coolify`)
+
+`coolify app|service start|stop|restart` prints the API's `message` with `fmt.Println`,
+whatever `--format` says, so these calls run with `json: false`. Parsing them as JSON turned
+every successful start into a `COOLIFY_ERROR`. A `GET` to these endpoints answers 200 with
+`This endpoint has changed to a POST request.` and does nothing; `coolify()` raises on that
+text so an old CLI cannot report a silent no-op as success.
 
 ## Lookup misses must raise, not return (`src/coolify.js#matchOrRaise`)
 

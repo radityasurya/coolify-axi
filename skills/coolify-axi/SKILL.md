@@ -46,10 +46,17 @@ npx -y coolify-axi deploy logs <name>       # why the latest deployment failed
 npx -y coolify-axi deploy watch <name>
 npx -y coolify-axi db get <name>
 npx -y coolify-axi service list
+npx -y coolify-axi service get <name>       # project, environment, server and destination uuids
+npx -y coolify-axi service compose <name>   # compose source, secrets redacted
 npx -y coolify-axi service env <name>
+npx -y coolify-axi service env <name> --set 'KEY={{team.SHARED_KEY}}'
 npx -y coolify-axi service restart <name>
+npx -y coolify-axi service create --docker-compose-file <path> --project-uuid <uuid> --server-uuid <uuid>
 npx -y coolify-axi service create --list-types
 npx -y coolify-axi service delete <name> --yes   # refuses without --yes
+npx -y coolify-axi project list
+npx -y coolify-axi project get <name>       # environments with id, name, uuid
+npx -y coolify-axi shared-env [--project <p> [--environment <e>]]   # keys only, never values
 npx -y coolify-axi context                  # which instance am I pointed at
 ```
 
@@ -60,9 +67,10 @@ specific Coolify instance instead of the default.
 
 - **Names, not uuids.** Every command accepts a resource name and resolves it. An ambiguous
   name stops and lists the uuids rather than acting on the wrong resource.
-- **Secrets are redacted by default.** `app env` and `db get` mask secret-shaped values and
-  passwords embedded in connection URLs. Pass `--reveal` only when the user asked for the
-  value, and never echo it into a summary.
+- **Secrets are redacted by default.** `app env` and `service env` mask every value except a
+  shared-variable reference such as `{{team.X}}`; `db get` masks secret-shaped values and
+  passwords embedded in connection URLs; `service compose` masks secret-named keys and token
+  shapes. Pass `--reveal` only when the user asked for the value, and never echo it into a summary.
 - **`app start` / `app stop` are idempotent** — already in the target state exits 0 as a
   no-op. Declare the desired state; do not read first.
 - **Adding a domain never drops the others.** `app domain --add` reads the current list and
