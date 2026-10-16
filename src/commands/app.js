@@ -101,6 +101,8 @@ const HELP = {
       "--health-check-path": "Health check path (letters, digits and / - _ . ~ % , ; only)",
       "--watch-paths / --clear-watch-paths": "Glob that triggers auto-deploy, repeatable; or remove them",
       "--auto-deploy on|off": "Deploy on push",
+      "--build-pack": `Switch the build pack in place (${BUILD_PACKS.join("|")})`,
+      "--dockerfile-location": "Dockerfile path in the repository, for example /Dockerfile.prod",
       "--webhook-secret-github-stdin": "Read the GitHub webhook secret from stdin (preferred: keeps it out of argv and shell history)",
       "--webhook-secret-github": "The secret as an argument (lands in shell history; prefer the stdin form)",
       "--clear-webhook-secret-github": "Remove the GitHub webhook secret",
@@ -109,6 +111,7 @@ const HELP = {
     examples: [
       `${BIN} app set strategist-web --pre-deploy "pnpm db:migrate" --pre-deploy-container web`,
       `${BIN} app set strategist-web --health-check on --health-check-path /api/health`,
+      `${BIN} app set strategist-web --build-pack dockerfile --dockerfile-location /Dockerfile`,
       `printf %s "$SECRET" | ${BIN} app set strategist-web --webhook-secret-github-stdin`,
     ],
   }),
@@ -447,6 +450,8 @@ async function set(argv) {
       "watch-paths": { type: "string", multiple: true },
       "clear-watch-paths": { type: "boolean" },
       "auto-deploy": { type: "string" },
+      "build-pack": { type: "string" },
+      "dockerfile-location": { type: "string" },
       "webhook-secret-github": { type: "string" },
       "webhook-secret-github-stdin": { type: "boolean" },
       "clear-webhook-secret-github": { type: "boolean" },
@@ -493,6 +498,17 @@ async function set(argv) {
   }
   if (values["clear-watch-paths"]) put("watch_paths", null);
   if (values["auto-deploy"] !== undefined) put("is_auto_deploy_enabled", onOff(values["auto-deploy"], "--auto-deploy"));
+
+  if (values["build-pack"] !== undefined) {
+    if (!BUILD_PACKS.includes(values["build-pack"])) {
+      throw new AxiError(`--build-pack ${values["build-pack"]} is not supported`, "VALIDATION_ERROR", [`valid build packs: ${BUILD_PACKS.join(", ")}`]);
+    }
+    put("build_pack", values["build-pack"]);
+  }
+  if (values["dockerfile-location"] !== undefined) {
+    if (!values["dockerfile-location"]) throw new AxiError("--dockerfile-location must not be empty", "VALIDATION_ERROR", ["Example: --dockerfile-location /Dockerfile"]);
+    put("dockerfile_location", values["dockerfile-location"]);
+  }
 
   const webhookModes = ["webhook-secret-github", "webhook-secret-github-stdin", "clear-webhook-secret-github"].filter((f) => values[f] !== undefined && values[f] !== false);
   if (webhookModes.length > 1) clash(`--${webhookModes[0]}`, `--${webhookModes[1]}`);

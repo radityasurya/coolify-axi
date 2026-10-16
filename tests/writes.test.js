@@ -60,6 +60,14 @@ test("app set PATCHes only the fields given and lists them", async () => {
   assert.ok(output.help.length > 0);
 });
 
+test("app set switches the build pack in place", async () => {
+  const seen = [];
+  io.fetchImpl = fetchOnce(200, { uuid: APP }, seen);
+  const output = await appCommand(["set", "digivaley", "--build-pack", "dockerfile", "--dockerfile-location", "/Dockerfile.prod"]);
+  assert.deepEqual(JSON.parse(seen[0].init.body), { build_pack: "dockerfile", dockerfile_location: "/Dockerfile.prod" });
+  assert.equal(output.changed.build_pack, "dockerfile");
+});
+
 test("the webhook secret is read from stdin, sent, and never printed", async () => {
   const seen = [];
   // The PATCH response echoes the secret; it must be discarded.
@@ -99,6 +107,8 @@ for (const [name, argv, pattern] of [
   ["empty health path", ["set", "digivaley", "--health-check-path", ""], /health-check-path must not be empty/],
   ["bad on/off", ["set", "digivaley", "--auto-deploy", "yes"], /on or off/],
   ["two webhook modes", ["set", "digivaley", "--webhook-secret-github", "x", "--clear-webhook-secret-github"], /not both/],
+  ["bad build pack", ["set", "digivaley", "--build-pack", "buildah"], /build-pack buildah is not supported/],
+  ["empty dockerfile location", ["set", "digivaley", "--dockerfile-location", ""], /dockerfile-location must not be empty/],
   ["empty pre-deploy", ["set", "digivaley", "--pre-deploy", ""], /needs a command/],
 ]) {
   test(`app set rejects ${name} before any request`, async () => {
@@ -241,6 +251,22 @@ test("db create redis never prints its password or URL", async () => {
   assert.ok(!out.includes("R3disPw") && !out.includes("redis://"));
   assert.equal(output.created.name, "cache");
 });
+
+for (const [engine, secret] of [["mariadb", "M4riaPw"], ["mysql", "MysqlPw"]]) {
+  test(`db create ${engine} never prints its password or URL`, async () => {
+    const calls = recordCalls();
+    const output = await dbCommand(["create", engine, "app-db", "--server", "localhost", "--project", "blog", "--image", `${engine}:11`, "--instant-deploy"]);
+    const create = calls().find((argv) => argv[1] === "create").filter((a, i, all) => a !== "--format" && all[i - 1] !== "--format");
+    assert.deepEqual(create, [
+      "database", "create", engine,
+      "--server-uuid", "srv1".padEnd(24, "x"), "--project-uuid", "prj1".padEnd(24, "x"), "--environment-name", "production",
+      "--name", "app-db", "--image", `${engine}:11`, "--instant-deploy",
+    ]);
+    const out = text(output);
+    for (const leak of [secret, "R00tPw", "mysql://", "_password"]) assert.ok(!out.includes(leak), leak);
+    assert.equal(output.created.type, engine);
+  });
+}
 
 test("db create validation and lookup misses", async () => {
   const calls = recordCalls();

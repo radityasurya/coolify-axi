@@ -98,6 +98,7 @@ coolify-axi app env digivaley           # env vars, values redacted
 coolify-axi app env digivaley --reveal  # env vars in clear text
 coolify-axi app env set digivaley KEY=VALUE            # runtime-only; add --build for build time
 coolify-axi app env delete digivaley OLD_KEY
+coolify-axi app set digivaley --build-pack dockerfile --dockerfile-location /Dockerfile
 coolify-axi app set digivaley --pre-deploy "pnpm db:migrate" --health-check on --auto-deploy on
 printf %s "$SECRET" | coolify-axi app set digivaley --webhook-secret-github-stdin
 coolify-axi app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh
@@ -118,6 +119,7 @@ coolify-axi db list
 coolify-axi db get blogs-pg             # connection details, secrets redacted
 coolify-axi db get blogs-pg --reveal
 coolify-axi db create postgres blogs-pg --server localhost --project blog   # password never printed
+coolify-axi db create mariadb wp-db --server localhost --project blog   # also mysql, redis
 
 coolify-axi service list
 coolify-axi service get cAdvisor            # project, environment, server and destination uuids, env keys
