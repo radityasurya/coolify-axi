@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.6](https://github.com/radityasurya/coolify-axi/compare/v0.1.5...v0.1.6) (2026-10-16)
+
+
+### Features
+
+* **app:** set build pack and Dockerfile location ([d136290](https://github.com/radityasurya/coolify-axi/commit/d136290af3a631723be47734eff6daf7278ecc08))
+* **db:** create mariadb and mysql databases ([f6af09a](https://github.com/radityasurya/coolify-axi/commit/f6af09a900790eae95c2951754874ce92a2fa761))
+* MariaDB/MySQL create and build-pack switch ([fdb6b4a](https://github.com/radityasurya/coolify-axi/commit/fdb6b4ae95f053dfeea15bb0da6c461feef20499))
+
 ## [0.1.5](https://github.com/radityasurya/coolify-axi/compare/v0.1.4...v0.1.5) (2026-10-16)
 
 
