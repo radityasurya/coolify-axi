@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/radityasurya/coolify-axi/compare/v0.1.4...v0.1.5) (2026-10-16)
+
+
+### Features
+
+* **app:** set compose-service domains and create from a deploy key ([a8b6f9f](https://github.com/radityasurya/coolify-axi/commit/a8b6f9f01ee5529ec551d7c20b03078f8e45d9ce))
+* **service:** set sub-service domains with service domain ([274fd42](https://github.com/radityasurya/coolify-axi/commit/274fd42bf024f4353fda60005f4597252e8ab63a))
+
 ## [0.1.4](https://github.com/radityasurya/coolify-axi/compare/v0.1.3...v0.1.4) (2026-10-11)
 
 
