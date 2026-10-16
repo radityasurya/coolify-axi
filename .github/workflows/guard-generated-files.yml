@@ -6,6 +6,7 @@ on:
       - .release-please-manifest.json
       - CHANGELOG.md
       - package.json
+      - package-lock.json
 
 jobs:
   guard:

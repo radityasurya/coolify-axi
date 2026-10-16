@@ -4,11 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    # release-please owns these; its PRs would only re-run an unchanged build.
+    # release-please owns these. Its PRs touch only these four files, so no PR workflow runs on them.
     paths-ignore:
       - .release-please-manifest.json
       - CHANGELOG.md
       - package.json
+      - package-lock.json
 
 jobs:
   test:
