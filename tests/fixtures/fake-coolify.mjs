@@ -93,6 +93,8 @@ const TABLE = {
     internal_db_url: "postgres://postgres:S3cr3tPw@newdb:5432/postgres",
     external_db_url: "postgres://postgres:S3cr3tPw@1.2.3.4:5433/postgres",
   },
+  "database create mariadb": { uuid: "newmdb".padEnd(24, "x"), name: "wp-db", mariadb_password: "M4riaPw", mariadb_root_password: "R00tPw", internal_db_url: "mysql://wp:M4riaPw@newmdb:3306/wp" },
+  "database create mysql": { uuid: "newmys".padEnd(24, "x"), name: "my-db", mysql_password: "MysqlPw", internal_db_url: "mysql://wp:MysqlPw@newmys:3306/wp" },
   "database create redis": { uuid: "newrds".padEnd(24, "x"), name: "cache", redis_password: "R3disPw", internal_db_url: "redis://default:R3disPw@newrds:6379/0" },
   [`app update ${RESOURCES[0].uuid}`]: { message: "updated" },
   [`app env create ${RESOURCES[0].uuid}`]: { message: "created" },

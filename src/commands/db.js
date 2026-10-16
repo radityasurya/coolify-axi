@@ -22,7 +22,7 @@ const HELP = {
     command: "db create",
     description: "Create a database; Coolify generates the password, and it is never printed",
     usage:
-      `${BIN} db create postgres|redis <name> --server <name|uuid> --project <name|uuid> ` +
+      `${BIN} db create postgres|mariadb|mysql|redis <name> --server <name|uuid> --project <name|uuid> ` +
       `[--environment <name>] [--image <image>] [--public-port <n>] [--instant-deploy]`,
     flags: {
       "--environment": "Environment name (default production)",
@@ -101,7 +101,7 @@ async function get(argv) {
   };
 }
 
-const ENGINES = { postgres: "postgresql", redis: "redis" };
+const ENGINES = { postgres: "postgresql", mariadb: "mariadb", mysql: "mysql", redis: "redis" };
 
 async function create(argv) {
   if (wantsHelp(argv)) return HELP.create;
@@ -117,7 +117,7 @@ async function create(argv) {
     },
   });
   const example = `${BIN} db create postgres blogs-pg --server localhost --project blog`;
-  const engine = required(positionals[0], "<postgres|redis>", "db create", example);
+  const engine = required(positionals[0], "<postgres|mariadb|mysql|redis>", "db create", example);
   if (!(engine in ENGINES)) {
     throw new AxiError(`unsupported engine ${engine}`, "VALIDATION_ERROR", [`valid engines: ${Object.keys(ENGINES).join(", ")}`]);
   }
@@ -154,7 +154,7 @@ export const dbCommand = makeDispatcher(
     summary: {
       list: "List databases with engine and health",
       get: "Show one database (secrets redacted)",
-      create: "Create a postgres or redis database (password generated, never printed)",
+      create: "Create a postgres, mariadb, mysql or redis database (password generated, never printed)",
     },
   },
 );

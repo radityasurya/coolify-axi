@@ -242,6 +242,22 @@ test("db create redis never prints its password or URL", async () => {
   assert.equal(output.created.name, "cache");
 });
 
+for (const [engine, secret] of [["mariadb", "M4riaPw"], ["mysql", "MysqlPw"]]) {
+  test(`db create ${engine} never prints its password or URL`, async () => {
+    const calls = recordCalls();
+    const output = await dbCommand(["create", engine, "app-db", "--server", "localhost", "--project", "blog", "--image", `${engine}:11`, "--instant-deploy"]);
+    const create = calls().find((argv) => argv[1] === "create").filter((a, i, all) => a !== "--format" && all[i - 1] !== "--format");
+    assert.deepEqual(create, [
+      "database", "create", engine,
+      "--server-uuid", "srv1".padEnd(24, "x"), "--project-uuid", "prj1".padEnd(24, "x"), "--environment-name", "production",
+      "--name", "app-db", "--image", `${engine}:11`, "--instant-deploy",
+    ]);
+    const out = text(output);
+    for (const leak of [secret, "R00tPw", "mysql://", "_password"]) assert.ok(!out.includes(leak), leak);
+    assert.equal(output.created.type, engine);
+  });
+}
+
 test("db create validation and lookup misses", async () => {
   const calls = recordCalls();
   await assert.rejects(() => dbCommand(["create", "oracle", "x", "--server", "s", "--project", "p"]), (e) => e.code === "VALIDATION_ERROR");

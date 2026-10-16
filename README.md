@@ -118,6 +118,7 @@ coolify-axi db list
 coolify-axi db get blogs-pg             # connection details, secrets redacted
 coolify-axi db get blogs-pg --reveal
 coolify-axi db create postgres blogs-pg --server localhost --project blog   # password never printed
+coolify-axi db create mariadb wp-db --server localhost --project blog   # also mysql, redis
 
 coolify-axi service list
 coolify-axi service get cAdvisor            # project, environment, server and destination uuids, env keys
