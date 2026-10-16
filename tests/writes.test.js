@@ -60,6 +60,14 @@ test("app set PATCHes only the fields given and lists them", async () => {
   assert.ok(output.help.length > 0);
 });
 
+test("app set switches the build pack in place", async () => {
+  const seen = [];
+  io.fetchImpl = fetchOnce(200, { uuid: APP }, seen);
+  const output = await appCommand(["set", "digivaley", "--build-pack", "dockerfile", "--dockerfile-location", "/Dockerfile.prod"]);
+  assert.deepEqual(JSON.parse(seen[0].init.body), { build_pack: "dockerfile", dockerfile_location: "/Dockerfile.prod" });
+  assert.equal(output.changed.build_pack, "dockerfile");
+});
+
 test("the webhook secret is read from stdin, sent, and never printed", async () => {
   const seen = [];
   // The PATCH response echoes the secret; it must be discarded.
@@ -99,6 +107,8 @@ for (const [name, argv, pattern] of [
   ["empty health path", ["set", "digivaley", "--health-check-path", ""], /health-check-path must not be empty/],
   ["bad on/off", ["set", "digivaley", "--auto-deploy", "yes"], /on or off/],
   ["two webhook modes", ["set", "digivaley", "--webhook-secret-github", "x", "--clear-webhook-secret-github"], /not both/],
+  ["bad build pack", ["set", "digivaley", "--build-pack", "buildah"], /build-pack buildah is not supported/],
+  ["empty dockerfile location", ["set", "digivaley", "--dockerfile-location", ""], /dockerfile-location must not be empty/],
   ["empty pre-deploy", ["set", "digivaley", "--pre-deploy", ""], /needs a command/],
 ]) {
   test(`app set rejects ${name} before any request`, async () => {

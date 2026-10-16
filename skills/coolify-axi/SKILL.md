@@ -33,9 +33,10 @@ npx -y coolify-axi app env <name>
 npx -y coolify-axi app env set <name> KEY=value [--build]
 npx -y coolify-axi app env delete <name> KEY
 npx -y coolify-axi app set <name> --pre-deploy "<cmd>" --health-check on --health-check-path /health
+npx -y coolify-axi app set <name> --build-pack dockerfile --dockerfile-location /Dockerfile
 npx -y coolify-axi app create <name> --repo <url> --branch main --server <s> --project <p>
 npx -y coolify-axi app create <name> --repo git@github.com:o/r.git --branch main --server <s> --project <p> --deploy-key <key>
-npx -y coolify-axi db create postgres <name> --server <s> --project <p>
+npx -y coolify-axi db create postgres|mariadb|mysql|redis <name> --server <s> --project <p>
 npx -y coolify-axi app domain <name>
 npx -y coolify-axi app domain <name> --add https://new.example
 npx -y coolify-axi app domain <name> --service <compose-service> https://example.com

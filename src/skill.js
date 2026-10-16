@@ -47,9 +47,10 @@ npx -y ${BIN} app env <name>
 npx -y ${BIN} app env set <name> KEY=value [--build]
 npx -y ${BIN} app env delete <name> KEY
 npx -y ${BIN} app set <name> --pre-deploy "<cmd>" --health-check on --health-check-path /health
+npx -y ${BIN} app set <name> --build-pack dockerfile --dockerfile-location /Dockerfile
 npx -y ${BIN} app create <name> --repo <url> --branch main --server <s> --project <p>
 npx -y ${BIN} app create <name> --repo git@github.com:o/r.git --branch main --server <s> --project <p> --deploy-key <key>
-npx -y ${BIN} db create postgres <name> --server <s> --project <p>
+npx -y ${BIN} db create postgres|mariadb|mysql|redis <name> --server <s> --project <p>
 npx -y ${BIN} app domain <name>
 npx -y ${BIN} app domain <name> --add https://new.example
 npx -y ${BIN} app domain <name> --service <compose-service> https://example.com
