@@ -354,3 +354,16 @@ test("a --set without an = is rejected", async () => {
     return true;
   });
 });
+
+test("domain sets the URLs of one sub-service through the API", async () => {
+  const seen = fakeApi({ [`PATCH /services/${"svc1".padEnd(24, "x")}`]: { message: "ok" } });
+  try {
+    const output = await serviceCommand(["domain", "cAdvisor", "--service", "cadvisor", "https://a.example,https://www.a.example"]);
+    assert.deepEqual(seen[0].body, { urls: [{ name: "cadvisor", url: "https://a.example,https://www.a.example" }] });
+    assert.deepEqual(output.domains, ["https://a.example", "https://www.a.example"]);
+    await assert.rejects(() => serviceCommand(["domain", "cAdvisor", "https://a.example"]), (e) => e.code === "VALIDATION_ERROR" && /--service/.test(e.message));
+    await assert.rejects(() => serviceCommand(["domain", "cAdvisor", "--service", "cadvisor"]), (e) => e.code === "VALIDATION_ERROR");
+  } finally {
+    restoreApi();
+  }
+});

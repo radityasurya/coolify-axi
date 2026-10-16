@@ -72,6 +72,13 @@ const HELP = {
     usage: `${BIN} service start|stop|restart <name|uuid>`,
     examples: [`${BIN} service restart cAdvisor`, `${BIN} service stop cAdvisor`],
   }),
+  domain: helpFor({
+    command: "service domain",
+    description: "Set the domains of one sub-service of a service (comma-separated domains replace the current ones)",
+    usage: `${BIN} service domain <name|uuid> --service <sub-service> <domains>`,
+    flags: { "--service": "Sub-service name in the service's compose, e.g. wordpress (required)" },
+    examples: [`${BIN} service domain modreview-wp --service wordpress https://modreview.net,https://www.modreview.net`],
+  }),
   env: helpFor({
     command: "service env",
     description: "List a service's environment variables, or set them with --set (idempotent)",
@@ -344,6 +351,26 @@ function stateChanger(action, desired) {
   };
 }
 
+async function domain(argv) {
+  if (wantsHelp(argv)) return HELP.domain;
+  const { values, positionals } = parse(argv, { command: "service domain", flags: { service: { type: "string" } } });
+  const example = `${BIN} service domain cAdvisor --service cadvisor https://cadvisor.example`;
+  const selector = required(positionals[0], "<name|uuid>", "service domain", example);
+  required(values.service, "--service", "service domain", example);
+  const domains = positionals.slice(1).join(",").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (!domains.length) throw new AxiError("<domains> is required", "VALIDATION_ERROR", [example]);
+  const options = { context: values.context };
+
+  const found = matchOrRaise(await coolify(["service", "list"], options), selector, "service");
+  await api("PATCH", `/services/${found.uuid}`, { urls: [{ name: values.service, url: domains.join(",") }] }, options);
+  return {
+    service: found.name,
+    sub_service: values.service,
+    domains,
+    help: [`Run \`${BIN} service restart ${found.name}\` to apply the new domains`],
+  };
+}
+
 async function env(argv) {
   if (wantsHelp(argv)) return HELP.env;
   const { values, positionals } = parse(argv, {
@@ -428,6 +455,7 @@ export const serviceCommand = makeDispatcher(
     start: stateChanger("start", "running"),
     stop: stateChanger("stop", "exited"),
     restart: stateChanger("restart", null),
+    domain,
     env,
   },
   {
@@ -441,6 +469,7 @@ export const serviceCommand = makeDispatcher(
       start: "Start a service (idempotent)",
       stop: "Stop a service (idempotent)",
       restart: "Restart a service",
+      domain: "Set the domains of one sub-service",
       env: "List a service's environment variables, or set them with --set",
     },
   },
