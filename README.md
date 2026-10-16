@@ -101,6 +101,8 @@ coolify-axi app env delete digivaley OLD_KEY
 coolify-axi app set digivaley --pre-deploy "pnpm db:migrate" --health-check on --auto-deploy on
 printf %s "$SECRET" | coolify-axi app set digivaley --webhook-secret-github-stdin
 coolify-axi app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh
+coolify-axi app create web --repo git@github.com:acme/web.git --branch main --server localhost --project blog --deploy-key coolify-hireopz
+coolify-axi app domain modreview-wp --service wordpress https://modreview.net   # Docker Compose app: domains per compose service
 coolify-axi app restart digivaley
 coolify-axi app stop karja-nl
 
@@ -122,6 +124,7 @@ coolify-axi service get cAdvisor            # project, environment, server and d
 coolify-axi service compose cAdvisor        # Docker Compose source, secrets redacted
 coolify-axi service env cAdvisor            # values redacted except {{team.X}} references
 coolify-axi service env cAdvisor --set 'ACCESS_TOKEN={{team.GH_RUNNER_TOKEN}}'
+coolify-axi service domain modreview-wp --service wordpress https://modreview.net   # domains of one sub-service
 coolify-axi service restart cAdvisor
 coolify-axi service create --list-types     # every valid one-click type
 coolify-axi service create n8n --project-uuid <uuid> --server-uuid <uuid>
@@ -156,7 +159,7 @@ coolify-axi service start runner-2             # 4. deploy it
 | *(none)* | — | Dashboard: every resource, its type, and its state |
 | `app` | `list`, `get`, `logs`, `env`, `set`, `create`, `start`, `stop`, `restart` | Applications; `env set`/`env delete` change variables, `set` changes deploy settings |
 | `db` | `list`, `get`, `create` | Databases, with redacted connection details; `create` takes `postgres` or `redis` |
-| `service` | `list`, `get`, `compose`, `create`, `delete`, `start`, `stop`, `restart`, `env` | Services from a template type or your own compose; delete is `--yes`-gated |
+| `service` | `list`, `get`, `compose`, `create`, `delete`, `start`, `stop`, `restart`, `domain`, `env` | Services from a template type or your own compose; delete is `--yes`-gated |
 | `project` | `list`, `get` | Projects and their environments (id, name, uuid) |
 | `shared-env` | `list` | Shared variable keys at team, project (`--project`), or environment (`--environment`) scope |
 | `server` | `list`, `get` | Connected servers |

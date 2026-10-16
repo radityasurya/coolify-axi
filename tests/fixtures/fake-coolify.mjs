@@ -79,6 +79,8 @@ const TABLE = {
   [`shared-env environment list ${"prj1".padEnd(24, "x")} production`]: [{ id: 3, key: "DB_URL", value: "********" }],
   [`shared-env environment list ${"prj1".padEnd(24, "x")} staging`]: [],
   "github list": [{ uuid: "gh1".padEnd(24, "x"), name: "acme-gh" }],
+  "private-key list": [{ uuid: "key1".padEnd(24, "x"), name: "coolify-hireopz" }],
+  "app create deploy-key": { uuid: "newapp".padEnd(24, "x"), domains: "" },
   "app create public": { uuid: "newapp".padEnd(24, "x"), domains: "https://web.example" },
   "app create github": { uuid: "newapp".padEnd(24, "x"), domains: "" },
   // Realistic secret-bearing response: none of these may reach the agent.

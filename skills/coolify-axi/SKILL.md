@@ -34,9 +34,12 @@ npx -y coolify-axi app env set <name> KEY=value [--build]
 npx -y coolify-axi app env delete <name> KEY
 npx -y coolify-axi app set <name> --pre-deploy "<cmd>" --health-check on --health-check-path /health
 npx -y coolify-axi app create <name> --repo <url> --branch main --server <s> --project <p>
+npx -y coolify-axi app create <name> --repo git@github.com:o/r.git --branch main --server <s> --project <p> --deploy-key <key>
 npx -y coolify-axi db create postgres <name> --server <s> --project <p>
 npx -y coolify-axi app domain <name>
 npx -y coolify-axi app domain <name> --add https://new.example
+npx -y coolify-axi app domain <name> --service <compose-service> https://example.com
+npx -y coolify-axi service domain <name> --service <sub-service> https://example.com
 npx -y coolify-axi app restart <name>
 npx -y coolify-axi deploy <name>            # shorthand for `deploy run <name>`
 npx -y coolify-axi deploy <name> --wait     # trigger, poll, then summarize the result

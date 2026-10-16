@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appCommand } from "../src/commands/app.js";
-import { failWith, recordCalls, useFakeCoolify } from "./helpers.js";
+import { failWith, fakeApi, recordCalls, restoreApi, useFakeCoolify } from "./helpers.js";
 
 test.beforeEach(useFakeCoolify);
 
@@ -182,4 +182,38 @@ test("a --set without an = is rejected", async () => {
     assert.equal(error.code, "VALIDATION_ERROR");
     return true;
   });
+});
+
+test("app create from a private repository resolves the deploy key by name", async () => {
+  const calls = recordCalls();
+  const output = await appCommand(["create", "web", "--repo", "git@github.com:acme/web.git", "--branch", "main", "--server", "localhost", "--project", "blog", "--deploy-key", "coolify-hireopz"]);
+  const create = calls().find((argv) => argv[1] === "create");
+  assert.deepEqual(create.slice(0, 5), ["app", "create", "deploy-key", "--private-key-uuid", "key1".padEnd(24, "x")]);
+  assert.ok(create.includes("git@github.com:acme/web.git"));
+  assert.equal(output.created.uuid, "newapp".padEnd(24, "x"));
+});
+
+test("app create --deploy-key validation", async () => {
+  const calls = recordCalls();
+  const base = ["create", "web", "--branch", "main", "--server", "localhost", "--project", "blog"];
+  await assert.rejects(() => appCommand([...base, "--repo", "acme/web", "--deploy-key", "k"]), (e) => e.code === "VALIDATION_ERROR" && /SSH URL/.test(e.message));
+  await assert.rejects(() => appCommand([...base, "--repo", "git@h:a/b.git", "--deploy-key", "k", "--github-app", "g"]), (e) => e.code === "VALIDATION_ERROR");
+  assert.equal(calls().length, 0);
+  await assert.rejects(() => appCommand([...base, "--repo", "git@h:a/b.git", "--deploy-key", "nope"]), (e) => e.code === "NOT_FOUND");
+});
+
+test("app domain --service patches docker_compose_domains through the API", async () => {
+  const seen = fakeApi({ [`PATCH /applications/${"app1".padEnd(24, "x")}`]: { message: "ok" } });
+  const calls = recordCalls();
+  try {
+    const output = await appCommand(["domain", "digivaley", "--service", "wordpress", "https://a.example,https://www.a.example"]);
+    assert.deepEqual(seen[0].body, { docker_compose_domains: [{ name: "wordpress", domain: "https://a.example,https://www.a.example" }] });
+    assert.deepEqual(output.domains, ["https://a.example", "https://www.a.example"]);
+    assert.equal(calls().filter((argv) => argv[0] === "app" && argv[1] === "update").length, 0);
+    await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "wordpress"]), (e) => e.code === "VALIDATION_ERROR");
+    await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "a b", "https://x"]), (e) => e.code === "VALIDATION_ERROR");
+    await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "w", "--add", "https://x", "https://y"]), (e) => e.code === "VALIDATION_ERROR");
+  } finally {
+    restoreApi();
+  }
 });

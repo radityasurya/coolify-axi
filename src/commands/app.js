@@ -32,6 +32,7 @@ export const io = {
 };
 
 const BUILD_PACKS = ["nixpacks", "static", "dockerfile", "dockercompose"];
+const COMPOSE_SERVICE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 const HEALTH_PATH = /^[a-zA-Z0-9/\-_.~%,;]+$/;
 
 const HELP = {
@@ -116,25 +117,28 @@ const HELP = {
     description: "Create an application from a git repository",
     usage:
       `${BIN} app create <name> --repo <url|owner/repo> --branch <b> --server <name|uuid> --project <name|uuid> ` +
-      `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>] [--instant-deploy]`,
+      `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>|--deploy-key <name|uuid>] [--instant-deploy]`,
     flags: {
-      "--repo": "A git URL (public repository), or owner/repo together with --github-app",
+      "--repo": "A git URL (public repository), owner/repo together with --github-app, or an SSH URL together with --deploy-key",
       "--environment": "Environment name (default production)",
       "--build-pack": "Default nixpacks",
       "--port": "Exposed port (default 3000)",
       "--github-app": "GitHub App that can read the repository (needed for owner/repo)",
+      "--deploy-key": "Private key (by name or uuid) that can read a private repository over SSH",
       "--instant-deploy": "Deploy right after creating",
     },
     examples: [
       `${BIN} app create web --repo https://github.com/acme/web --branch main --server localhost --project blog`,
       `${BIN} app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh --build-pack dockerfile`,
+      `${BIN} app create web --repo git@github.com:acme/web.git --branch main --server localhost --project blog --deploy-key coolify-hireopz`,
     ],
   }),
   domain: helpFor({
     command: "app domain",
     description: "Show the domains an application serves, or change them",
-    usage: `${BIN} app domain <name|uuid> [<domains>] [--add <domain>] [--remove <domain>]`,
+    usage: `${BIN} app domain <name|uuid> [<domains>] [--add <domain>] [--remove <domain>] [--service <compose-service> <domains>]`,
     flags: {
+      "--service": "Docker Compose application: set the domains of one compose service (comma-separated <domains> replace them)",
       "--add": "Append a domain, keeping the existing ones (repeatable, idempotent)",
       "--remove": "Drop one domain, keeping the rest (repeatable, idempotent)",
     },
@@ -142,6 +146,7 @@ const HELP = {
       `${BIN} app domain digivaley`,
       `${BIN} app domain digivaley --add https://new.example`,
       `${BIN} app domain digivaley https://only.example`,
+      `${BIN} app domain modreview-wp --service wordpress https://modreview.net,https://www.modreview.net`,
     ],
   }),
   start: helpFor({
@@ -534,6 +539,7 @@ async function create(argv) {
       port: { type: "string" },
       domain: { type: "string" },
       "github-app": { type: "string" },
+      "deploy-key": { type: "string" },
       "instant-deploy": { type: "boolean" },
     },
   });
@@ -546,11 +552,17 @@ async function create(argv) {
   }
   const port = positiveInt(values.port, "--port", 3000);
   const isUrl = /^([a-z][a-z0-9+.-]*:\/\/|git@)/i.test(values.repo);
-  if (!isUrl && !values["github-app"]) {
+  if (!isUrl && !values["github-app"] && !values["deploy-key"]) {
     // The repo is not echoed: a malformed `user:token@host/x` would print its token.
     throw new AxiError("--repo is not a URL, so a GitHub App is needed to read it", "VALIDATION_ERROR", [
       "Pass --github-app <name|uuid>, or give the full git URL for a public repository",
     ]);
+  }
+  if (values["deploy-key"] && values["github-app"]) {
+    throw new AxiError("pass --deploy-key or --github-app, not both", "VALIDATION_ERROR", [example]);
+  }
+  if (values["deploy-key"] && !isUrl) {
+    throw new AxiError("--deploy-key needs --repo as an SSH URL", "VALIDATION_ERROR", ["Example: --repo git@github.com:acme/web.git --deploy-key <name>"]);
   }
   if (isUrl && values["github-app"]) {
     throw new AxiError("--github-app needs --repo as owner/repo, not a URL", "VALIDATION_ERROR", [`Example: --repo acme/web --github-app <name>`]);
@@ -559,7 +571,11 @@ async function create(argv) {
   const options = { context: values.context };
   const placement = await resolvePlacement(values, options);
   const source = [];
-  if (values["github-app"]) {
+  if (values["deploy-key"]) {
+    // The key's uuid is not a secret; its private half never leaves Coolify.
+    const key = matchOrRaise(await coolify(["private-key", "list"], options), values["deploy-key"], "deploy key", { list: false });
+    source.push("deploy-key", "--private-key-uuid", key.uuid);
+  } else if (values["github-app"]) {
     const gh = matchOrRaise(await coolify(["github", "list"], options), values["github-app"], "github app", { list: false });
     source.push("github", "--github-app-uuid", gh.uuid);
   } else {
@@ -591,11 +607,37 @@ function domainList(fqdn) {
     .filter(Boolean);
 }
 
+/** `app domain <app> --service <name> <domains>`: Docker Compose apps keep domains per compose service. */
+async function composeDomain(found, values, domains, options) {
+  const example = `${BIN} app domain ${found.name} --service wordpress https://example.com`;
+  if (!COMPOSE_SERVICE.test(values.service)) {
+    throw new AxiError("--service is not a compose service name", "VALIDATION_ERROR", [example]);
+  }
+  const list = domainList(domains.join(","));
+  if (!list.length) throw new AxiError("<domains> is required with --service", "VALIDATION_ERROR", [example]);
+  if (values.add?.length || values.remove?.length) {
+    throw new AxiError("--add and --remove do not combine with --service", "VALIDATION_ERROR", [example]);
+  }
+  // REST only: the wrapped CLI sets compose domains at create time, never after.
+  await api(
+    "PATCH",
+    `/applications/${found.uuid}`,
+    { docker_compose_domains: [{ name: values.service, domain: list.join(",") }] },
+    { ...options, fetchImpl: io.fetchImpl },
+  );
+  return {
+    app: found.name,
+    service: values.service,
+    domains: list,
+    help: [`Run \`${BIN} deploy ${found.name}\` to issue certificates and route the new domains`],
+  };
+}
+
 async function domain(argv) {
   if (wantsHelp(argv)) return HELP.domain;
   const { values, positionals } = parse(argv, {
     command: "app domain",
-    flags: { add: { type: "string", multiple: true }, remove: { type: "string", multiple: true } },
+    flags: { add: { type: "string", multiple: true }, remove: { type: "string", multiple: true }, service: { type: "string" } },
   });
   const selector = required(
     positionals[0],
@@ -605,6 +647,7 @@ async function domain(argv) {
   );
   const options = { context: values.context };
   const found = await resolveResource(selector, { ...options, type: TYPE });
+  if (values.service !== undefined) return composeDomain(found, values, positionals.slice(1), options);
   const detail = await coolify(["app", "get", found.uuid], options);
   const before = domainList(detail.fqdn);
 
