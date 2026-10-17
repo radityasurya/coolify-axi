@@ -99,6 +99,7 @@ coolify-axi app env digivaley --reveal  # env vars in clear text
 coolify-axi app env set digivaley KEY=VALUE            # runtime-only; add --build for build time
 coolify-axi app env delete digivaley OLD_KEY
 coolify-axi app set digivaley --build-pack dockerfile --dockerfile-location /Dockerfile
+coolify-axi app set digivaley --build-secrets on --inject-build-args off   # build-time env vars as BuildKit secrets
 coolify-axi app set digivaley --pre-deploy "pnpm db:migrate" --health-check on --auto-deploy on
 printf %s "$SECRET" | coolify-axi app set digivaley --webhook-secret-github-stdin
 coolify-axi app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh

@@ -79,7 +79,7 @@ const HELP = {
     },
     notes:
       "Values are never echoed back, and are masked out of any error text. A value already stored is a no-op. " +
-      "Build-time values are passed to the build as --build-arg and baked into the image, so keep secrets runtime-only. " +
+      "Build-time values are passed to the build as --build-arg (or as BuildKit secrets when `app set --build-secrets on` is set) and can be baked into the image, so keep secrets runtime-only. " +
       "To make a build-time variable runtime-only, delete it and set it again.",
     examples: [
       `${BIN} app env digivaley`,
@@ -101,6 +101,8 @@ const HELP = {
       "--health-check-path": "Health check path (letters, digits and / - _ . ~ % , ; only)",
       "--watch-paths / --clear-watch-paths": "Glob that triggers auto-deploy, repeatable; or remove them",
       "--auto-deploy on|off": "Deploy on push",
+      "--build-secrets on|off": "Pass build-time env vars as Docker BuildKit secrets instead of --build-arg",
+      "--inject-build-args on|off": "Off: build arguments are managed manually in the Dockerfile (Coolify does not inject them)",
       "--build-pack": `Switch the build pack in place (${BUILD_PACKS.join("|")})`,
       "--dockerfile-location": "Dockerfile path in the repository, for example /Dockerfile.prod",
       "--webhook-secret-github-stdin": "Read the GitHub webhook secret from stdin (preferred: keeps it out of argv and shell history)",
@@ -112,6 +114,7 @@ const HELP = {
       `${BIN} app set strategist-web --pre-deploy "pnpm db:migrate" --pre-deploy-container web`,
       `${BIN} app set strategist-web --health-check on --health-check-path /api/health`,
       `${BIN} app set strategist-web --build-pack dockerfile --dockerfile-location /Dockerfile`,
+      `${BIN} app set strategist-web --build-secrets on --inject-build-args off`,
       `printf %s "$SECRET" | ${BIN} app set strategist-web --webhook-secret-github-stdin`,
     ],
   }),
@@ -450,6 +453,8 @@ async function set(argv) {
       "watch-paths": { type: "string", multiple: true },
       "clear-watch-paths": { type: "boolean" },
       "auto-deploy": { type: "string" },
+      "build-secrets": { type: "string" },
+      "inject-build-args": { type: "string" },
       "build-pack": { type: "string" },
       "dockerfile-location": { type: "string" },
       "webhook-secret-github": { type: "string" },
@@ -498,6 +503,8 @@ async function set(argv) {
   }
   if (values["clear-watch-paths"]) put("watch_paths", null);
   if (values["auto-deploy"] !== undefined) put("is_auto_deploy_enabled", onOff(values["auto-deploy"], "--auto-deploy"));
+  if (values["build-secrets"] !== undefined) put("use_build_secrets", onOff(values["build-secrets"], "--build-secrets"));
+  if (values["inject-build-args"] !== undefined) put("inject_build_args_to_dockerfile", onOff(values["inject-build-args"], "--inject-build-args"));
 
   if (values["build-pack"] !== undefined) {
     if (!BUILD_PACKS.includes(values["build-pack"])) {
