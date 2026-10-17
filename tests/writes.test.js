@@ -68,6 +68,13 @@ test("app set switches the build pack in place", async () => {
   assert.equal(output.changed.build_pack, "dockerfile");
 });
 
+test("app set toggles build secrets and build-arg injection", async () => {
+  const seen = [];
+  io.fetchImpl = fetchOnce(200, { uuid: APP }, seen);
+  await appCommand(["set", "digivaley", "--build-secrets", "on", "--inject-build-args", "off"]);
+  assert.deepEqual(JSON.parse(seen[0].init.body), { use_build_secrets: true, inject_build_args_to_dockerfile: false });
+});
+
 test("the webhook secret is read from stdin, sent, and never printed", async () => {
   const seen = [];
   // The PATCH response echoes the secret; it must be discarded.
@@ -106,6 +113,8 @@ for (const [name, argv, pattern] of [
   ["bad health path", ["set", "digivaley", "--health-check-path", "/a b"], /health-check-path/],
   ["empty health path", ["set", "digivaley", "--health-check-path", ""], /health-check-path must not be empty/],
   ["bad on/off", ["set", "digivaley", "--auto-deploy", "yes"], /on or off/],
+  ["bad build-secrets on/off", ["set", "digivaley", "--build-secrets", "yes"], /on or off/],
+  ["bad inject-build-args on/off", ["set", "digivaley", "--inject-build-args", "maybe"], /on or off/],
   ["two webhook modes", ["set", "digivaley", "--webhook-secret-github", "x", "--clear-webhook-secret-github"], /not both/],
   ["bad build pack", ["set", "digivaley", "--build-pack", "buildah"], /build-pack buildah is not supported/],
   ["empty dockerfile location", ["set", "digivaley", "--dockerfile-location", ""], /dockerfile-location must not be empty/],
