@@ -193,6 +193,13 @@ test("app create from a private repository resolves the deploy key by name", asy
   assert.equal(output.created.uuid, "newapp".padEnd(24, "x"));
 });
 
+test("app create --destination passes the destination uuid through", async () => {
+  const calls = recordCalls();
+  await appCommand(["create", "web", "--repo", "git@github.com:acme/web.git", "--branch", "main", "--server", "localhost", "--project", "blog", "--deploy-key", "coolify-hireopz", "--destination", "dest1"]);
+  const create = calls().find((argv) => argv[1] === "create");
+  assert.equal(create[create.indexOf("--destination-uuid") + 1], "dest1");
+});
+
 test("app create --deploy-key validation", async () => {
   const calls = recordCalls();
   const base = ["create", "web", "--branch", "main", "--server", "localhost", "--project", "blog"];
