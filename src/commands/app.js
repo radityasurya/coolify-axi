@@ -120,7 +120,7 @@ const HELP = {
     description: "Create an application from a git repository",
     usage:
       `${BIN} app create <name> --repo <url|owner/repo> --branch <b> --server <name|uuid> --project <name|uuid> ` +
-      `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>|--deploy-key <name|uuid>] [--instant-deploy]`,
+      `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>|--deploy-key <name|uuid>] [--destination <uuid>] [--instant-deploy]`,
     flags: {
       "--repo": "A git URL (public repository), owner/repo together with --github-app, or an SSH URL together with --deploy-key",
       "--environment": "Environment name (default production)",
@@ -128,6 +128,7 @@ const HELP = {
       "--port": "Exposed port (default 3000)",
       "--github-app": "GitHub App that can read the repository (needed for owner/repo)",
       "--deploy-key": "Private key (by name or uuid) that can read a private repository over SSH",
+      "--destination": "Docker network destination uuid; required when the server has more than one (`service get` shows the one other resources use)",
       "--instant-deploy": "Deploy right after creating",
     },
     examples: [
@@ -556,6 +557,7 @@ async function create(argv) {
       domain: { type: "string" },
       "github-app": { type: "string" },
       "deploy-key": { type: "string" },
+      destination: { type: "string" },
       "instant-deploy": { type: "boolean" },
     },
   });
@@ -602,6 +604,7 @@ async function create(argv) {
     "--name", name, "--git-repository", values.repo, "--git-branch", values.branch,
     "--build-pack", buildPack, "--ports-exposes", String(port),
     ...(values.domain ? ["--domains", values.domain] : []),
+    ...(values.destination ? ["--destination-uuid", values.destination] : []),
     ...(values["dockerfile-target"] ? ["--dockerfile-target-build", values["dockerfile-target"]] : []),
     ...(values["instant-deploy"] ? ["--instant-deploy"] : []),
   ];
