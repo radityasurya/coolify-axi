@@ -90,7 +90,7 @@ or the skill, not both.
 coolify-axi                             # dashboard — every resource and its health
 coolify-axi app list                    # applications only
 coolify-axi app list --status exited    # only what is broken
-coolify-axi app get digivaley           # domain, repo, branch, build pack
+coolify-axi app get digivaley           # domain, repo, branch, build pack, base directory, health check
 coolify-axi app logs digivaley          # recent container logs, truncated
 coolify-axi app logs digivaley --lines 500 --full
 coolify-axi app logs digivaley --lines 1000 --grep "error|refused"  # repeats fold into [xN]; --keep-repeats to disable
@@ -102,7 +102,10 @@ coolify-axi app set digivaley --build-pack dockerfile --dockerfile-location /Doc
 coolify-axi app set digivaley --pre-deploy "pnpm db:migrate" --health-check on --auto-deploy on
 printf %s "$SECRET" | coolify-axi app set digivaley --webhook-secret-github-stdin
 coolify-axi app create web --repo acme/web --branch main --server localhost --project blog --github-app acme-gh
-coolify-axi app create web --repo git@github.com:acme/web.git --branch main --server localhost --project blog --deploy-key coolify-hireopz
+coolify-axi app create web --repo git@github.com:acme/web.git --branch main --server localhost --project blog --deploy-key coolify-hireopz --destination <uuid>   # --destination also on db create
+coolify-axi app domain digivaley --clear      # remove every domain on purpose (an app created without --domain gets a public sslip.io one)
+coolify-axi app labels digivaley        # container labels; basicauth.users values redacted
+coolify-axi app labels digivaley --add "traefik.enable=true" --remove old.label   # or --set-file labels.txt; deploy to apply
 coolify-axi app domain modreview-wp --service wordpress https://modreview.net   # Docker Compose app: domains per compose service
 coolify-axi app restart digivaley
 coolify-axi app stop karja-nl

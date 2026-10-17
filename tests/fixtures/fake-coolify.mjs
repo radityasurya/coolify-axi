@@ -64,6 +64,10 @@ const TABLE = {
     git_repository: "git@github.com:radityasurya/digivaley.com.git",
     git_branch: "master",
     build_pack: "dockerfile",
+    base_directory: "/web",
+    dockerfile_location: "/Dockerfile",
+    health_check_enabled: false,
+    health_check_path: "/up",
     custom_labels: "BASE64NOISE".repeat(400),
   },
   [`app env list ${RESOURCES[0].uuid}`]: [
