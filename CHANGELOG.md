@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7](https://github.com/radityasurya/coolify-axi/compare/v0.1.6...v0.1.7) (2026-10-17)
+
+
+### Features
+
+* **app:** pass --destination to app create ([6540c5b](https://github.com/radityasurya/coolify-axi/commit/6540c5bff77f3053e61027b739e283b8f6c09bd2))
+* **app:** pass --destination to app create ([f7fe205](https://github.com/radityasurya/coolify-axi/commit/f7fe205a28f3a7e37b6c8272e539ba5cb561cabb))
+
 ## [0.1.6](https://github.com/radityasurya/coolify-axi/compare/v0.1.5...v0.1.6) (2026-10-16)
 
 
