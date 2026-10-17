@@ -48,6 +48,7 @@ npx -y ${BIN} app env set <name> KEY=value [--build]
 npx -y ${BIN} app env delete <name> KEY
 npx -y ${BIN} app set <name> --pre-deploy "<cmd>" --health-check on --health-check-path /health
 npx -y ${BIN} app set <name> --build-pack dockerfile --dockerfile-location /Dockerfile
+npx -y ${BIN} app set <name> --build-secrets on --inject-build-args off
 npx -y ${BIN} app create <name> --repo <url> --branch main --server <s> --project <p>
 npx -y ${BIN} app create <name> --repo git@github.com:o/r.git --branch main --server <s> --project <p> --deploy-key <key>
 npx -y ${BIN} db create postgres|mariadb|mysql|redis <name> --server <s> --project <p>
@@ -98,7 +99,7 @@ specific Coolify instance instead of the default.
   reported \`unchanged\` without a write; changes apply on the next deployment. Variables are
   runtime-only unless \`--build\`. Values are masked out of error text too.
 - **\`app set\` sends only the fields you pass** (deploy hooks, health check, watch paths,
-  auto-deploy, build pack and Dockerfile path). Feed the GitHub webhook secret on stdin with \`--webhook-secret-github-stdin\`;
+  auto-deploy, build pack, Dockerfile path, \`--build-secrets\`, \`--inject-build-args\`). Feed the GitHub webhook secret on stdin with \`--webhook-secret-github-stdin\`;
   it is write-only and never printed.
 - **\`db create\` and \`app create\` never print passwords or connection URLs.** Coolify generates
   the password; use \`db get <name> --reveal\` only if the user asked for it.
