@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/radityasurya/coolify-axi/compare/v0.1.8...v0.1.9) (2026-10-19)
+
+
+### Features
+
+* **app:** container labels, domain --clear, db create --destination, richer app get ([6eb27cc](https://github.com/radityasurya/coolify-axi/commit/6eb27ccda4217f54757a927344966bed648b26c8))
+
 ## [0.1.8](https://github.com/radityasurya/coolify-axi/compare/v0.1.7...v0.1.8) (2026-10-17)
 
 
