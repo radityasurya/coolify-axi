@@ -323,3 +323,10 @@ test("app create validation", async () => {
   await assert.rejects(() => appCommand(["create", "web"]), (e) => e.code === "VALIDATION_ERROR" && /--repo/.test(e.message));
   assert.equal(calls().length, 0);
 });
+
+test("db create --destination passes the destination uuid through", async () => {
+  const calls = recordCalls();
+  await dbCommand(["create", "postgres", "blogs-pg", "--server", "localhost", "--project", "blog", "--destination", "dest1"]);
+  const create = calls().find((argv) => argv[1] === "create");
+  assert.equal(create[create.indexOf("--destination-uuid") + 1], "dest1");
+});

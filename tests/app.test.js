@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { appCommand } from "../src/commands/app.js";
 import { failWith, fakeApi, recordCalls, restoreApi, useFakeCoolify } from "./helpers.js";
 
@@ -220,6 +223,80 @@ test("app domain --service patches docker_compose_domains through the API", asyn
     await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "wordpress"]), (e) => e.code === "VALIDATION_ERROR");
     await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "a b", "https://x"]), (e) => e.code === "VALIDATION_ERROR");
     await assert.rejects(() => appCommand(["domain", "digivaley", "--service", "w", "--add", "https://x", "https://y"]), (e) => e.code === "VALIDATION_ERROR");
+  } finally {
+    restoreApi();
+  }
+});
+
+test("get shows base directory and health check settings", async () => {
+  const { app } = await appCommand(["get", "digivaley"]);
+  assert.equal(app.base_directory, "/web");
+  assert.equal(app.dockerfile_location, "/Dockerfile");
+  assert.equal(app.health_check_enabled, false);
+  assert.equal(app.health_check_path, "/up");
+});
+
+test("domain --clear empties the list on purpose, and only on its own", async () => {
+  const calls = recordCalls();
+  const output = await appCommand(["domain", "digivaley", "--clear"]);
+  const update = calls().find((argv) => argv[1] === "update");
+  assert.equal(update[update.indexOf("--domains") + 1], "");
+  assert.deepEqual(output.domains, []);
+  assert.deepEqual(output.removed, ["https://digivaley.com"]);
+  await assert.rejects(() => appCommand(["domain", "digivaley", "--clear", "--add", "https://x"]), (e) => e.code === "VALIDATION_ERROR");
+});
+
+const b64 = (text) => Buffer.from(text).toString("base64");
+const LABELS = ["traefik.enable=true", "traefik.http.middlewares.a.basicauth.users=admin:$apr1$secret", "x=1"].join("\n");
+const APP_PATH = `/applications/${"app1".padEnd(24, "x")}`;
+
+test("labels shows decoded labels and redacts auth values", async () => {
+  const seen = fakeApi({ [`GET ${APP_PATH}`]: { custom_labels: b64(LABELS) } });
+  try {
+    const output = await appCommand(["labels", "digivaley"]);
+    assert.deepEqual(output.labels, ["traefik.enable=true", "traefik.http.middlewares.a.basicauth.users=<redacted>", "x=1"]);
+    assert.doesNotMatch(JSON.stringify(output), /secret/);
+    assert.equal(seen.length, 1);
+  } finally {
+    restoreApi();
+  }
+});
+
+test("labels --add replaces a key, --remove drops one, and PATCH sends custom_labels only", async () => {
+  const seen = fakeApi({ [`GET ${APP_PATH}`]: { custom_labels: b64(LABELS) }, [`PATCH ${APP_PATH}`]: { message: "ok" } });
+  try {
+    const output = await appCommand(["labels", "digivaley", "--add", "x=2", "--add", "new=a=b", "--remove", "traefik.enable"]);
+    const patch = seen.find((r) => r.key.startsWith("PATCH"));
+    assert.deepEqual(Object.keys(patch.body), ["custom_labels"]);
+    assert.equal(Buffer.from(patch.body.custom_labels, "base64").toString(), "traefik.http.middlewares.a.basicauth.users=admin:$apr1$secret\nx=2\nnew=a=b");
+    assert.ok(output.help.some((line) => line.includes("deploy")));
+    assert.doesNotMatch(JSON.stringify(output), /secret/);
+  } finally {
+    restoreApi();
+  }
+});
+
+test("labels with no change sends no PATCH", async () => {
+  const seen = fakeApi({ [`GET ${APP_PATH}`]: { custom_labels: b64(LABELS) } });
+  try {
+    const output = await appCommand(["labels", "digivaley", "--add", "x=1", "--remove", "absent"]);
+    assert.equal(output.unchanged, true);
+    assert.equal(seen.filter((r) => r.key.startsWith("PATCH")).length, 0);
+  } finally {
+    restoreApi();
+  }
+});
+
+test("labels --set-file replaces everything", async () => {
+  const file = join(mkdtempSync(join(tmpdir(), "coolify-axi-labels-")), "labels.txt");
+  writeFileSync(file, "a=1\n\nb=2\n");
+  const seen = fakeApi({ [`GET ${APP_PATH}`]: { custom_labels: b64(LABELS) }, [`PATCH ${APP_PATH}`]: { message: "ok" } });
+  try {
+    await appCommand(["labels", "digivaley", "--set-file", file]);
+    const patch = seen.find((r) => r.key.startsWith("PATCH"));
+    assert.equal(Buffer.from(patch.body.custom_labels, "base64").toString(), "a=1\nb=2");
+    await assert.rejects(() => appCommand(["labels", "digivaley", "--set-file", file, "--add", "a=1"]), (e) => e.code === "VALIDATION_ERROR");
+    await assert.rejects(() => appCommand(["labels", "digivaley", "--add", "novalue"]), (e) => e.code === "VALIDATION_ERROR");
   } finally {
     restoreApi();
   }

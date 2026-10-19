@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { AxiError } from "axi-sdk-js";
 import { api } from "../api.js";
 import { coolify, health, matchOrRaise, maskEnvValue, pick, resolvePlacement, resolveResource, scrubbed, summarize } from "../coolify.js";
@@ -17,6 +18,10 @@ const DETAIL_FIELDS = [
   "git_branch",
   "build_pack",
   "ports_exposes",
+  "base_directory",
+  "dockerfile_location",
+  "health_check_enabled",
+  "health_check_path",
 ];
 
 const LOG_LIMIT = 4000;
@@ -124,6 +129,7 @@ const HELP = {
     usage:
       `${BIN} app create <name> --repo <url|owner/repo> --branch <b> --server <name|uuid> --project <name|uuid> ` +
       `[--environment <name>] [--build-pack ${BUILD_PACKS.join("|")}] [--dockerfile-target <stage>] [--port <n>] [--domain <url>] [--github-app <name|uuid>|--deploy-key <name|uuid>] [--destination <uuid>] [--instant-deploy]`,
+    notes: "Without --domain the app gets a public http://<uuid>.<ip>.sslip.io domain; remove it with `app domain <name> --clear`.",
     flags: {
       "--repo": "A git URL (public repository), owner/repo together with --github-app, or an SSH URL together with --deploy-key",
       "--environment": "Environment name (default production)",
@@ -131,7 +137,7 @@ const HELP = {
       "--port": "Exposed port (default 3000)",
       "--github-app": "GitHub App that can read the repository (needed for owner/repo)",
       "--deploy-key": "Private key (by name or uuid) that can read a private repository over SSH",
-      "--destination": "Docker network destination uuid; required when the server has more than one (`service get` shows the one other resources use)",
+      "--destination": "Docker network destination uuid (not a name: there is no destination listing); required when the server has more than one (`service get` shows the one other resources use)",
       "--instant-deploy": "Deploy right after creating",
     },
     examples: [
@@ -143,17 +149,43 @@ const HELP = {
   domain: helpFor({
     command: "app domain",
     description: "Show the domains an application serves, or change them",
-    usage: `${BIN} app domain <name|uuid> [<domains>] [--add <domain>] [--remove <domain>] [--service <compose-service> <domains>]`,
+    usage: `${BIN} app domain <name|uuid> [<domains>] [--add <domain>] [--remove <domain>] [--clear] [--service <compose-service> <domains>]`,
     flags: {
+      "--clear": "Remove every domain on purpose. Without it, a change that would leave no domain is refused",
       "--service": "Docker Compose application: set the domains of one compose service (comma-separated <domains> replace them)",
       "--add": "Append a domain, keeping the existing ones (repeatable, idempotent)",
       "--remove": "Drop one domain, keeping the rest (repeatable, idempotent)",
     },
+    notes:
+      "`app create` without --domain gives the app a public http://<uuid>.<ip>.sslip.io domain; `--clear` removes it.",
     examples: [
       `${BIN} app domain digivaley`,
+      `${BIN} app domain digivaley --clear`,
       `${BIN} app domain digivaley --add https://new.example`,
       `${BIN} app domain digivaley https://only.example`,
       `${BIN} app domain modreview-wp --service wordpress https://modreview.net,https://www.modreview.net`,
+    ],
+  }),
+  labels: helpFor({
+    command: "app labels",
+    description: "Show an application's container labels, or replace or edit them (REST PATCH of custom_labels)",
+    usage:
+      `${BIN} app labels <name|uuid>\n` +
+      `${BIN} app labels <name|uuid> --set-file <path>\n` +
+      `${BIN} app labels <name|uuid> [--add <label=value>] [--remove <key>]`,
+    flags: {
+      "--set-file": "Replace every label with the lines of this file (one label per line)",
+      "--add": "Add a label, or replace the value of an existing key (repeatable, idempotent)",
+      "--remove": "Drop the label with this key (repeatable, idempotent)",
+    },
+    notes:
+      "Values of basicauth.users and digestauth.users labels are redacted in the output. " +
+      "Labels apply on the next deployment.",
+    examples: [
+      `${BIN} app labels digivaley`,
+      `${BIN} app labels digivaley --add "traefik.http.routers.web.middlewares=gzip"`,
+      `${BIN} app labels digivaley --remove traefik.http.routers.web.middlewares`,
+      `${BIN} app labels digivaley --set-file ./labels.txt`,
     ],
   }),
   start: helpFor({
@@ -663,7 +695,7 @@ async function domain(argv) {
   if (wantsHelp(argv)) return HELP.domain;
   const { values, positionals } = parse(argv, {
     command: "app domain",
-    flags: { add: { type: "string", multiple: true }, remove: { type: "string", multiple: true }, service: { type: "string" } },
+    flags: { add: { type: "string", multiple: true }, remove: { type: "string", multiple: true }, service: { type: "string" }, clear: { type: "boolean" } },
   });
   const selector = required(
     positionals[0],
@@ -673,12 +705,17 @@ async function domain(argv) {
   );
   const options = { context: values.context };
   const found = await resolveResource(selector, { ...options, type: TYPE });
+  if (values.clear && (values.service !== undefined || values.add?.length || values.remove?.length || positionals[1] !== undefined)) {
+    throw new AxiError("--clear does not combine with <domains>, --add, --remove or --service", "VALIDATION_ERROR", [
+      `Run \`${BIN} app domain ${found.name} --clear\` on its own`,
+    ]);
+  }
   if (values.service !== undefined) return composeDomain(found, values, positionals.slice(1), options);
   const detail = await coolify(["app", "get", found.uuid], options);
   const before = domainList(detail.fqdn);
 
   const replacing = positionals[1] !== undefined;
-  if (!replacing && !values.add?.length && !values.remove?.length) {
+  if (!replacing && !values.add?.length && !values.remove?.length && !values.clear) {
     return {
       app: found.name,
       domains: before.length ? before : "no domains set",
@@ -686,7 +723,7 @@ async function domain(argv) {
     };
   }
 
-  let after = replacing ? domainList(positionals.slice(1).join(",")) : [...before];
+  let after = values.clear ? [] : replacing ? domainList(positionals.slice(1).join(",")) : [...before];
   for (const entry of values.add ?? []) {
     for (const one of domainList(entry)) if (!after.includes(one)) after.push(one);
   }
@@ -695,9 +732,10 @@ async function domain(argv) {
     after = after.filter((one) => !drop.has(one));
   }
 
-  if (after.length === 0) {
+  if (after.length === 0 && !values.clear) {
     throw new AxiError("that would leave the application with no domain", "VALIDATION_ERROR", [
       "Coolify would stop routing traffic to it entirely",
+      `To remove every domain on purpose: ${BIN} app domain ${found.name} --clear`,
       `Pass the domains to keep: ${BIN} app domain ${found.name} https://keep.example`,
     ]);
   }
@@ -705,6 +743,7 @@ async function domain(argv) {
     return { app: found.name, domains: after, unchanged: true, note: "already set (no-op)" };
   }
 
+  // `--domains ""` is the only way the wrapped CLI empties the list.
   await coolify(["app", "update", found.uuid, "--domains", after.join(",")], {
     ...options,
     json: false,
@@ -715,9 +754,81 @@ async function domain(argv) {
     domains: after,
     ...(removed.length ? { removed } : {}),
     help: [
-      `Run \`${BIN} deploy ${found.name}\` to issue certificates and route the new domains`,
+      ...(after.length ? [`Run \`${BIN} deploy ${found.name}\` to issue certificates and route the new domains`] : [`Run \`${BIN} deploy ${found.name}\` to apply; the app has no domain until you add one`]),
       ...(removed.length ? ["A removed domain stops resolving to this app immediately"] : []),
     ],
+  };
+}
+
+const AUTH_LABEL = /(basic|digest)auth\.users$/i;
+const redactLabel = (line) => {
+  const at = line.indexOf("=");
+  return at > 0 && AUTH_LABEL.test(line.slice(0, at)) ? `${line.slice(0, at)}=<redacted>` : line;
+};
+const labelKey = (line) => line.slice(0, Math.max(line.indexOf("="), 0) || line.length);
+const decodeLabels = (b64) => (b64 ? Buffer.from(b64, "base64").toString("utf8").split("\n").filter((l) => l.trim()) : []);
+
+/** `app labels`: read custom_labels, or replace / edit them with one REST PATCH. */
+async function labels(argv) {
+  if (wantsHelp(argv)) return HELP.labels;
+  const { values, positionals } = parse(argv, {
+    command: "app labels",
+    flags: { "set-file": { type: "string" }, add: { type: "string", multiple: true }, remove: { type: "string", multiple: true } },
+  });
+  const selector = required(positionals[0], "<name|uuid>", "app labels", `${BIN} app labels digivaley`);
+  const editing = values.add?.length || values.remove?.length;
+  if (values["set-file"] !== undefined && editing) {
+    throw new AxiError("--set-file does not combine with --add or --remove", "VALIDATION_ERROR", ["Use one of them"]);
+  }
+  for (const pair of values.add ?? []) {
+    if (pair.indexOf("=") < 1) throw new AxiError("--add needs label=value", "VALIDATION_ERROR", [`Example: ${BIN} app labels ${selector} --add traefik.enable=true`]);
+  }
+  let replacement;
+  if (values["set-file"] !== undefined) {
+    try {
+      replacement = readFileSync(values["set-file"], "utf8").split(/\r?\n/).filter((l) => l.trim());
+    } catch {
+      throw new AxiError("cannot read the --set-file path", "VALIDATION_ERROR", ["Pass a readable file with one label=value per line"]);
+    }
+  }
+
+  const options = { context: values.context, fetchImpl: io.fetchImpl };
+  const found = await resolveResource(selector, { context: values.context, type: TYPE });
+  const detail = await api("GET", `/applications/${found.uuid}`, undefined, options);
+  const before = decodeLabels(detail?.custom_labels);
+  const show = (lines) => (lines.length ? lines.map(redactLabel) : `no custom labels on ${found.name}`);
+
+  if (replacement === undefined && !editing) {
+    return {
+      app: found.name,
+      labels: show(before),
+      help: [`Run \`${BIN} app labels ${found.name} --add <label=value>\` to add one`],
+    };
+  }
+
+  let after = replacement;
+  if (after === undefined) {
+    after = [...before];
+    for (const key of values.remove ?? []) after = after.filter((l) => labelKey(l) !== key);
+    for (const pair of values.add ?? []) {
+      const index = after.findIndex((l) => labelKey(l) === labelKey(pair));
+      if (index < 0) after.push(pair);
+      else after[index] = pair;
+    }
+  }
+  if (after.join("\n") === before.join("\n")) {
+    return { app: found.name, labels: show(after), unchanged: true, note: "already set (no-op)" };
+  }
+
+  // Only custom_labels: the API rejects is_container_label_readonly_enabled.
+  const secrets = after.filter((l) => AUTH_LABEL.test(labelKey(l))).map((l) => l.slice(l.indexOf("=") + 1));
+  await scrubbed(secrets, () =>
+    api("PATCH", `/applications/${found.uuid}`, { custom_labels: Buffer.from(after.join("\n"), "utf8").toString("base64") }, options),
+  );
+  return {
+    app: found.name,
+    labels: show(after),
+    help: [`Run \`${BIN} deploy ${found.name}\` to apply the labels; a running container keeps the old ones`],
   };
 }
 
@@ -760,6 +871,7 @@ export const appCommand = makeDispatcher(
     set,
     create,
     domain,
+    labels,
     start: stateChanger("start", "running"),
     stop: stateChanger("stop", "exited"),
     restart: stateChanger("restart", null),
@@ -773,7 +885,8 @@ export const appCommand = makeDispatcher(
       env: "List environment variables; `env set KEY=VALUE` / `env delete KEY` to change them",
       set: "Change deploy hooks, health check, watch paths, auto-deploy, webhook secret",
       create: "Create an application from a git repository",
-      domain: "Show or change the domains an application serves",
+      domain: "Show or change the domains an application serves (`--clear` removes them all)",
+      labels: "Show or edit container labels (`--add`, `--remove`, `--set-file`)",
       start: "Start an application (idempotent)",
       stop: "Stop an application (idempotent)",
       restart: "Restart an application",

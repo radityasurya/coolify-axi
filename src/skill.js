@@ -54,6 +54,9 @@ npx -y ${BIN} app create <name> --repo git@github.com:o/r.git --branch main --se
 npx -y ${BIN} db create postgres|mariadb|mysql|redis <name> --server <s> --project <p>
 npx -y ${BIN} app domain <name>
 npx -y ${BIN} app domain <name> --add https://new.example
+npx -y ${BIN} app domain <name> --clear   # remove every domain on purpose
+npx -y ${BIN} app labels <name>
+npx -y ${BIN} app labels <name> --add <label=value> --remove <key>   # or --set-file <path>
 npx -y ${BIN} app domain <name> --service <compose-service> https://example.com
 npx -y ${BIN} service domain <name> --service <sub-service> https://example.com
 npx -y ${BIN} app restart <name>
@@ -94,7 +97,14 @@ specific Coolify instance instead of the default.
   no-op. Declare the desired state; do not read first.
 - **Adding a domain never drops the others.** \`app domain --add\` reads the current list and
   appends; passing domains positionally replaces the list and reports what it removed.
-  Leaving an app with zero domains is refused — Coolify would stop routing to it.
+  Leaving an app with zero domains is refused — Coolify would stop routing to it — unless you
+  pass \`--clear\`. An app created without \`--domain\` gets a public \`http://<uuid>.<ip>.sslip.io\`
+  domain; \`app domain <name> --clear\` removes it.
+- **\`app labels\` edits container labels with one REST PATCH** (\`--add\` replaces an existing key,
+  \`--remove\`, \`--set-file\`). A no-change edit sends nothing. Values of \`basicauth.users\` and
+  \`digestauth.users\` labels are redacted. Deploy to apply.
+- **Pass \`--destination <uuid>\` to \`app create\` and \`db create\`** when the server has more than
+  one Docker network. It takes a uuid, not a name; \`service get\` shows the one other resources use.
 - **\`app env set\` is idempotent and never echoes values back.** A value already stored is
   reported \`unchanged\` without a write; changes apply on the next deployment. Variables are
   runtime-only unless \`--build\`. Values are masked out of error text too.

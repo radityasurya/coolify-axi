@@ -23,11 +23,12 @@ const HELP = {
     description: "Create a database; Coolify generates the password, and it is never printed",
     usage:
       `${BIN} db create postgres|mariadb|mysql|redis <name> --server <name|uuid> --project <name|uuid> ` +
-      `[--environment <name>] [--image <image>] [--public-port <n>] [--instant-deploy]`,
+      `[--environment <name>] [--image <image>] [--public-port <n>] [--destination <uuid>] [--instant-deploy]`,
     flags: {
       "--environment": "Environment name (default production)",
       "--image": "Image and tag, for example postgres:18",
       "--public-port": "Expose the database on this host port (makes it public)",
+      "--destination": "Docker network destination uuid (not a name: there is no destination listing); required when the server has more than one",
       "--instant-deploy": "Start it right after creating",
     },
     examples: [`${BIN} db create postgres blogs-pg --server localhost --project blog --instant-deploy`],
@@ -113,6 +114,7 @@ async function create(argv) {
       environment: { type: "string" },
       image: { type: "string" },
       "public-port": { type: "string" },
+      destination: { type: "string" },
       "instant-deploy": { type: "boolean" },
     },
   });
@@ -131,6 +133,7 @@ async function create(argv) {
   const created = await coolify(
     [
       "database", "create", ENGINES[engine], ...placement, "--name", name,
+      ...(values.destination ? ["--destination-uuid", values.destination] : []),
       ...(values.image ? ["--image", values.image] : []),
       ...(publicPort ? ["--is-public", "--public-port", String(publicPort)] : []),
       ...(values["instant-deploy"] ? ["--instant-deploy"] : []),
