@@ -28,6 +28,7 @@ const DETAIL = {
   name: "cAdvisor",
   status: "running:healthy",
   environment_id: 7,
+  connect_to_docker_network: true,
   server_id: 1,
   destination_id: 1,
   docker_compose_raw: COMPOSE,
@@ -65,6 +66,7 @@ test("get names the project, environment, server, destination, and env keys a cl
     name: "cAdvisor",
     uuid: SVC,
     status: "running:healthy",
+    connect_to_docker_network: true,
     project: "blog",
     project_uuid: PRJ,
     environment: "production",
@@ -367,3 +369,31 @@ test("domain sets the URLs of one sub-service through the API", async () => {
     restoreApi();
   }
 });
+
+test("set --predefined-network patches connect_to_docker_network and hints a restart", async () => {
+  for (const [flag, expected] of [["on", true], ["off", false]]) {
+    const seen = fakeApi({ [`PATCH /services/${SVC}`]: { uuid: SVC } });
+    const calls = recordCalls();
+    const output = await serviceCommand(["set", "cAdvisor", "--predefined-network", flag]);
+
+    assert.deepEqual(seen.map((c) => c.body), [{ connect_to_docker_network: expected }]);
+    assert.equal(output.predefined_network, flag);
+    assert.ok(output.help.some((line) => line.includes("service restart cAdvisor")));
+    assert.equal(calls().filter((argv) => argv[1] !== "list").length, 0);
+  }
+});
+
+for (const [name, argv, pattern] of [
+  ["no setting", ["set", "cAdvisor"], /no setting/],
+  ["a bad value", ["set", "cAdvisor", "--predefined-network", "maybe"], /on or off/],
+  ["no service", ["set", "--predefined-network", "on"], /<name\|uuid>/],
+]) {
+  test(`set refuses ${name} before any request`, async () => {
+    const seen = fakeApi({ [`PATCH /services/${SVC}`]: { uuid: SVC } });
+    await assert.rejects(
+      () => serviceCommand(argv),
+      (error) => error.code === "VALIDATION_ERROR" && pattern.test(error.message),
+    );
+    assert.equal(seen.length, 0);
+  });
+}

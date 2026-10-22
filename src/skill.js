@@ -59,6 +59,7 @@ npx -y ${BIN} app labels <name>
 npx -y ${BIN} app labels <name> --add <label=value> --remove <key>   # or --set-file <path>
 npx -y ${BIN} app domain <name> --service <compose-service> https://example.com
 npx -y ${BIN} service domain <name> --service <sub-service> https://example.com
+npx -y ${BIN} service set <name> --predefined-network on|off   # restart to apply
 npx -y ${BIN} app restart <name>
 npx -y ${BIN} deploy <name>            # shorthand for \`deploy run <name>\`
 npx -y ${BIN} deploy <name> --wait     # trigger, poll, then summarize the result

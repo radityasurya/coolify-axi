@@ -7,7 +7,7 @@ import { redactCompose } from "../logs.js";
 
 // The API detail carries the compose source and, for a read:sensitive token,
 // the destination's server with its settings; the view is an allow-list.
-const DETAIL_FIELDS = ["name", "uuid", "status", "description", "fqdn"];
+const DETAIL_FIELDS = ["name", "uuid", "status", "description", "fqdn", "connect_to_docker_network"];
 
 const HELP = {
   list: helpFor({
@@ -78,6 +78,14 @@ const HELP = {
     usage: `${BIN} service domain <name|uuid> --service <sub-service> <domains>`,
     flags: { "--service": "Sub-service name in the service's compose, e.g. wordpress (required)" },
     examples: [`${BIN} service domain modreview-wp --service wordpress https://modreview.net,https://www.modreview.net`],
+  }),
+  set: helpFor({
+    command: "service set",
+    description: "Change a service setting the raw CLI has no flag for: Connect To Predefined Network (REST PATCH)",
+    usage: `${BIN} service set <name|uuid> --predefined-network on|off`,
+    flags: { "--predefined-network on|off": "Connect the service to the destination's predefined Docker network" },
+    notes: "The change applies on the next restart.",
+    examples: [`${BIN} service set cAdvisor --predefined-network on`],
   }),
   env: helpFor({
     command: "service env",
@@ -371,6 +379,32 @@ async function domain(argv) {
   };
 }
 
+async function set(argv) {
+  if (wantsHelp(argv)) return HELP.set;
+  const { values, positionals } = parse(argv, {
+    command: "service set",
+    flags: { "predefined-network": { type: "string" } },
+  });
+  const example = `${BIN} service set cAdvisor --predefined-network on`;
+  const selector = required(positionals[0], "<name|uuid>", "service set", example);
+  const value = values["predefined-network"];
+  if (value === undefined) {
+    throw new AxiError("no setting given", "VALIDATION_ERROR", [`Example: ${example}`]);
+  }
+  if (value !== "on" && value !== "off") {
+    throw new AxiError("--predefined-network must be on or off", "VALIDATION_ERROR", ["Example: --predefined-network on"]);
+  }
+  const options = { context: values.context };
+
+  const found = matchOrRaise(await coolify(["service", "list"], options), selector, "service");
+  await api("PATCH", `/services/${found.uuid}`, { connect_to_docker_network: value === "on" }, options);
+  return {
+    service: found.name,
+    predefined_network: value,
+    help: [`Run \`${BIN} service restart ${found.name}\` to apply the network change`],
+  };
+}
+
 async function env(argv) {
   if (wantsHelp(argv)) return HELP.env;
   const { values, positionals } = parse(argv, {
@@ -456,6 +490,7 @@ export const serviceCommand = makeDispatcher(
     stop: stateChanger("stop", "exited"),
     restart: stateChanger("restart", null),
     domain,
+    set,
     env,
   },
   {
@@ -470,6 +505,7 @@ export const serviceCommand = makeDispatcher(
       stop: "Stop a service (idempotent)",
       restart: "Restart a service",
       domain: "Set the domains of one sub-service",
+      set: "Change a service setting (--predefined-network on|off)",
       env: "List a service's environment variables, or set them with --set",
     },
   },

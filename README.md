@@ -131,6 +131,7 @@ coolify-axi service compose cAdvisor        # Docker Compose source, secrets red
 coolify-axi service env cAdvisor            # values redacted except {{team.X}} references
 coolify-axi service env cAdvisor --set 'ACCESS_TOKEN={{team.GH_RUNNER_TOKEN}}'
 coolify-axi service domain modreview-wp --service wordpress https://modreview.net   # domains of one sub-service
+coolify-axi service set cAdvisor --predefined-network on   # Connect To Predefined Network; restart to apply
 coolify-axi service restart cAdvisor
 coolify-axi service create --list-types     # every valid one-click type
 coolify-axi service create n8n --project-uuid <uuid> --server-uuid <uuid>
